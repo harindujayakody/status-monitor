@@ -75,8 +75,8 @@ fi
 # 4. Test real SQLite backup creation, verification, and restoration
 if command -v sqlite3 >/dev/null 2>&1; then
     db_path="${TMP_INSTALL_DIR}/data/uptime-kuma/kuma.db"
-    sqlite3 "${db_path}" "CREATE TABLE monitor (id INTEGER PRIMARY KEY, url TEXT); INSERT INTO monitor VALUES (1, 'https://status.infiax.com');"
-    set_env_val "BESZEL_DOMAIN" "dev-monitor.infiax.com" "${TMP_INSTALL_DIR}/.env"
+    sqlite3 "${db_path}" "CREATE TABLE monitor (id INTEGER PRIMARY KEY, url TEXT); INSERT INTO monitor VALUES (1, 'https://status.example.com');"
+    set_env_val "BESZEL_DOMAIN" "monitor.example.com" "${TMP_INSTALL_DIR}/.env"
 
     assert_ok "monitor.sh backup creates verified archive" bash "${REPO_ROOT}/monitor.sh" backup
     assert_ok "monitor.sh backup --list" bash "${REPO_ROOT}/monitor.sh" backup --list
@@ -93,7 +93,7 @@ if command -v sqlite3 >/dev/null 2>&1; then
 
     restored_url="$(sqlite3 "${db_path}" "SELECT url FROM monitor WHERE id=1;")"
     restored_domain="$(get_env_val "BESZEL_DOMAIN" "" "${TMP_INSTALL_DIR}/.env")"
-    if [[ "${restored_url}" == "https://status.infiax.com" && "${restored_domain}" == "dev-monitor.infiax.com" ]]; then
+    if [[ "${restored_url}" == "https://status.example.com" && "${restored_domain}" == "monitor.example.com" ]]; then
         printf '[PASS] SQLite database and .env restored and verified accurately\n'
         pass_cnt=$(( pass_cnt + 1 ))
     else

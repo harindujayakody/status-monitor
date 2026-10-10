@@ -8,7 +8,7 @@
 # ==============================================================================
 
 {
-	email {$ACME_EMAIL:admin@infiax.com}
+	email {$ACME_EMAIL:admin@example.com}
 	admin 127.0.0.1:2019
 }
 
@@ -33,7 +33,7 @@ Disallow: /
 # ------------------------------------------------------------------------------
 # Uptime Kuma — Public Status Page & Monitoring Dashboard
 # ------------------------------------------------------------------------------
-{$STATUS_DOMAIN:status.infiax.com} {
+{$STATUS_DOMAIN:status.example.com} {
 	import security_headers
 
 	encode zstd gzip
@@ -59,7 +59,7 @@ Disallow: /
 # ------------------------------------------------------------------------------
 # Beszel Hub — Server Resource & Container Metrics Dashboard
 # ------------------------------------------------------------------------------
-{$BESZEL_DOMAIN:dev-monitor.infiax.com} {
+{$BESZEL_DOMAIN:monitor.example.com} {
 	import security_headers
 
 	encode zstd gzip

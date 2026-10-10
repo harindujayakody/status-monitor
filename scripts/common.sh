@@ -20,9 +20,9 @@ export ISM_BRAND_NAME="INFIAX STATUS MONITOR"
 export ISM_REPO_URL="https://github.com/harindujayakody/status-monitor"
 export ISM_DEFAULT_INSTALL_DIR="/opt/infiax-status-monitor"
 export ISM_COMPOSE_PROJECT="infiax-status-monitor"
-export ISM_DEFAULT_STATUS_DOMAIN="status.infiax.com"
-export ISM_DEFAULT_BESZEL_DOMAIN="dev-monitor.infiax.com"
-export ISM_DEFAULT_SERVER_IPV4="129.213.54.54"
+export ISM_DEFAULT_STATUS_DOMAIN="status.example.com"
+export ISM_DEFAULT_BESZEL_DOMAIN="monitor.example.com"
+export ISM_DEFAULT_SERVER_IPV4="203.0.113.10"
 
 # Resolve paths relative to this script
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -404,7 +404,7 @@ validate_domain() {
         return 1
     fi
     if [[ "${domain}" == *"_"* ]]; then
-        msg_error "Invalid domain '${domain}': underscores (_) are not permitted in hostnames or TLS certificates. Use hyphens (-) instead (e.g., dev-monitor.infiax.com)."
+        msg_error "Invalid domain '${domain}': underscores (_) are not permitted in hostnames or TLS certificates. Use hyphens (-) instead (e.g., dev-monitor.example.com)."
         return 1
     fi
     if [[ "${domain}" == *"://"* || "${domain}" == *"/"* ]]; then

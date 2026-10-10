@@ -51,9 +51,9 @@ jobs:
         run: |
           docker run --rm \
             -v "${PWD}/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            -e STATUS_DOMAIN=status.infiax.com \
-            -e BESZEL_DOMAIN=dev-monitor.infiax.com \
-            -e ACME_EMAIL=admin@infiax.com \
+            -e STATUS_DOMAIN=status.example.com \
+            -e BESZEL_DOMAIN=monitor.example.com \
+            -e ACME_EMAIL=admin@example.com \
             caddy:2.11.7-alpine \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 

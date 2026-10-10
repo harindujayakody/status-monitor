@@ -24,9 +24,9 @@ services:
       - "443:443/udp"
     environment:
       TZ: ${TZ:-UTC}
-      STATUS_DOMAIN: ${STATUS_DOMAIN:-status.infiax.com}
-      BESZEL_DOMAIN: ${BESZEL_DOMAIN:-dev-monitor.infiax.com}
-      ACME_EMAIL: ${ACME_EMAIL:-admin@infiax.com}
+      STATUS_DOMAIN: ${STATUS_DOMAIN:-status.example.com}
+      BESZEL_DOMAIN: ${BESZEL_DOMAIN:-monitor.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./data/caddy/data:/data
@@ -90,7 +90,7 @@ services:
       - "8090"
     environment:
       TZ: ${TZ:-UTC}
-      APP_URL: ${BESZEL_APP_URL:-https://dev-monitor.infiax.com}
+      APP_URL: ${BESZEL_APP_URL:-https://monitor.example.com}
     volumes:
       - ./data/beszel:/beszel_data
       - ./data/beszel-socket:/beszel_socket
@@ -121,7 +121,7 @@ services:
       LISTEN: ${BESZEL_AGENT_LISTEN:-/beszel_socket/beszel.sock}
       KEY: ${BESZEL_AGENT_KEY:-}
       TOKEN: ${BESZEL_AGENT_TOKEN:-}
-      HUB_URL: ${BESZEL_HUB_URL:-https://dev-monitor.infiax.com}
+      HUB_URL: ${BESZEL_HUB_URL:-https://monitor.example.com}
       DOCKER_IMAGE_CHECK: ${BESZEL_DOCKER_IMAGE_CHECK:-false}
       MEM_CALC: ${BESZEL_MEM_CALC:-default}
     volumes:

@@ -62,30 +62,30 @@ assert_ok "install.sh --help" bash "${REPO_ROOT}/install.sh" --help
 assert_ok "install.sh --version" bash "${REPO_ROOT}/install.sh" --version
 
 # 3. Domain validation (including underscore rejection rule)
-assert_ok "validate_domain accepts status.infiax.com" validate_domain "status.infiax.com"
-assert_ok "validate_domain accepts dev-monitor.infiax.com" validate_domain "dev-monitor.infiax.com"
-assert_fail "validate_domain rejects underscore dev_monitor.infiax.com" validate_domain "dev_monitor.infiax.com"
-assert_fail "validate_domain rejects URL scheme https://status.infiax.com" validate_domain "https://status.infiax.com"
+assert_ok "validate_domain accepts status.example.com" validate_domain "status.example.com"
+assert_ok "validate_domain accepts dev-monitor.example.com" validate_domain "dev-monitor.example.com"
+assert_fail "validate_domain rejects underscore dev_monitor.example.com" validate_domain "dev_monitor.example.com"
+assert_fail "validate_domain rejects URL scheme https://status.example.com" validate_domain "https://status.example.com"
 assert_fail "validate_domain rejects empty string" validate_domain ""
 
 # 4. IPv4 & Email validation
-assert_ok "validate_ipv4 accepts 129.213.54.54" validate_ipv4 "129.213.54.54"
+assert_ok "validate_ipv4 accepts 203.0.113.10" validate_ipv4 "203.0.113.10"
 assert_fail "validate_ipv4 rejects 999.213.54.54" validate_ipv4 "999.213.54.54"
-assert_ok "validate_email accepts admin@infiax.com" validate_email "admin@infiax.com"
+assert_ok "validate_email accepts admin@example.com" validate_email "admin@example.com"
 
 # 5. Runtime directory preparation & idempotency
 assert_ok "prepare_runtime_directories initial run" prepare_runtime_directories "${TMP_INSTALL_DIR}"
 assert_ok ".env file created" test -f "${TMP_INSTALL_DIR}/.env"
 
 # Verify idempotency: customize .env, re-run prepare_runtime_directories, verify custom value preserved
-set_env_val "STATUS_DOMAIN" "custom-status.infiax.com" "${TMP_INSTALL_DIR}/.env"
+set_env_val "STATUS_DOMAIN" "custom-status.example.com" "${TMP_INSTALL_DIR}/.env"
 prepare_runtime_directories "${TMP_INSTALL_DIR}" >/dev/null
 val="$(get_env_val "STATUS_DOMAIN" "" "${TMP_INSTALL_DIR}/.env")"
-if [[ "${val}" == "custom-status.infiax.com" ]]; then
+if [[ "${val}" == "custom-status.example.com" ]]; then
     printf '[PASS] Installer idempotency: existing .env values preserved on re-run\n'
     pass_cnt=$(( pass_cnt + 1 ))
 else
-    printf '[FAIL] Installer idempotency: expected custom-status.infiax.com, got %s\n' "${val}" >&2
+    printf '[FAIL] Installer idempotency: expected custom-status.example.com, got %s\n' "${val}" >&2
     fail_cnt=$(( fail_cnt + 1 ))
 fi
 

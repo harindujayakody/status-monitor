@@ -49,9 +49,9 @@ Usage:
 Options:
   --dry-run, -n             Run all preflight checks and preview changes without installing
   --yes, -y                 Non-interactive mode (accept defaults and confirmations)
-  --status-domain <domain>  Override Uptime Kuma domain (default: status.infiax.com)
-  --beszel-domain <domain>  Override Beszel Hub domain (default: dev-monitor.infiax.com)
-  --acme-email <email>      Override Let's Encrypt email (default: admin@infiax.com)
+  --status-domain <domain>  Override Uptime Kuma domain (default: status.example.com)
+  --beszel-domain <domain>  Override Beszel Hub domain (default: monitor.example.com)
+  --acme-email <email>      Override Let's Encrypt email (default: admin@example.com)
   --allow-unsupported-os    Allow running on non-Ubuntu systems for testing
   --help, -h                Show this help message
   --version, -v             Show version information

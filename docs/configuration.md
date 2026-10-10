@@ -34,15 +34,15 @@ All runtime settings for **Infiax Status Monitor** are stored in `/opt/infiax-st
 | :--- | :--- | :--- |
 | `COMPOSE_PROJECT_NAME` | `infiax-status-monitor` | Stable Docker Compose project identifier |
 | `TZ` | `UTC` | Container timezone |
-| `STATUS_DOMAIN` | `status.infiax.com` | Public FQDN for Uptime Kuma |
-| `BESZEL_DOMAIN` | `dev-monitor.infiax.com` | Public FQDN for Beszel Hub |
-| `ACME_EMAIL` | `admin@infiax.com` | Email for Let's Encrypt TLS registration |
-| `SERVER_IPV4` | `129.213.54.54` | Expected public IPv4 used during DNS preflight |
+| `STATUS_DOMAIN` | `status.example.com` | Public FQDN for Uptime Kuma |
+| `BESZEL_DOMAIN` | `monitor.example.com` | Public FQDN for Beszel Hub |
+| `ACME_EMAIL` | `admin@example.com` | Email for Let's Encrypt TLS registration |
+| `SERVER_IPV4` | `203.0.113.10` | Expected public IPv4 used during DNS preflight |
 | `CADDY_IMAGE` | `caddy:2.11.7-alpine` | Pinned multi-arch Caddy image |
 | `UPTIME_KUMA_IMAGE` | `louislam/uptime-kuma:2.5.6-slim` | Pinned lightweight Uptime Kuma v2 image (no Chromium bloat) |
 | `BESZEL_HUB_IMAGE` | `henrygd/beszel:0.21.0` | Pinned multi-arch Beszel Hub image |
 | `BESZEL_AGENT_IMAGE` | `henrygd/beszel-agent:0.21.0` | Pinned multi-arch Beszel Agent image |
-| `BESZEL_APP_URL` | `https://dev-monitor.infiax.com` | Base URL used by Beszel Hub for alert links |
+| `BESZEL_APP_URL` | `https://monitor.example.com` | Base URL used by Beszel Hub for alert links |
 | `BESZEL_AGENT_LISTEN` | `/beszel_socket/beszel.sock` | Unix domain socket path shared with Beszel Hub |
 | `BESZEL_AGENT_KEY` | *(auto-synced / user-set)* | Beszel Hub `ssh-ed25519` public key |
 | `BESZEL_AGENT_TOKEN` | *(optional)* | Beszel Agent token for WebSocket registration |
@@ -74,6 +74,6 @@ Because `beszel` (Hub) and `beszel-agent` share the `/opt/infiax-status-monitor/
 
 1. `beszel-agent` listens on the Unix domain socket `/beszel_socket/beszel.sock` instead of opening TCP port `45876` on the host.
 2. `beszel-agent` uses `network_mode: host` (required by Beszel to read host network interface bandwidth counters) while exposing **zero** TCP listening ports.
-3. In the Beszel Hub web UI (`https://dev-monitor.infiax.com`), add your system with:
+3. In the Beszel Hub web UI (`https://monitor.example.com`), add your system with:
    - **Host / IP**: `/beszel_socket/beszel.sock`
 4. Run `sudo /opt/infiax-status-monitor/monitor.sh beszel-agent` (Menu Option 05) to view or update `BESZEL_AGENT_KEY` and `BESZEL_AGENT_TOKEN`.

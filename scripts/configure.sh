@@ -124,7 +124,7 @@ configure_domains_interactive() {
     local cur_status cur_beszel cur_email cur_ipv4
     cur_status="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
     cur_beszel="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
-    cur_email="$(get_env_val "ACME_EMAIL" "admin@infiax.com" "${env_file}")"
+    cur_email="$(get_env_val "ACME_EMAIL" "admin@example.com" "${env_file}")"
     cur_ipv4="$(get_env_val "SERVER_IPV4" "${ISM_DEFAULT_SERVER_IPV4}" "${env_file}")"
 
     print_kv "Current Status Domain" "${cur_status}"
@@ -132,7 +132,7 @@ configure_domains_interactive() {
     print_kv "Current ACME Email" "${cur_email}"
     print_kv "Expected Server IPv4" "${cur_ipv4}"
     printf '\n'
-    msg_info "Note: Use hyphens (-), never underscores (_), in domain names (e.g., dev-monitor.infiax.com)."
+    msg_info "Note: Use hyphens (-), never underscores (_), in domain names (e.g., dev-monitor.example.com)."
 
     local new_status=""
     while true; do

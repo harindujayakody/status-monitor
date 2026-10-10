@@ -20,15 +20,15 @@ This guide walks you through deploying **Infiax Status Monitor** on Ubuntu Serve
 
 ## 2. Configure DNS Records First
 
-Before running the installer, create two **DNS `A` records** pointing to your VPS public IPv4 address (`129.213.54.54` for the Infiax production server):
+Before running the installer, create two **DNS `A` records** pointing to your VPS public IPv4 address (e.g., `203.0.113.10`):
 
 | Host / Subdomain | Record Type | Value (Target IPv4) | Purpose |
 | :--- | :--- | :--- | :--- |
-| `status.infiax.com` | `A` | `129.213.54.54` | Uptime Kuma Status Page & Dashboard |
-| `dev-monitor.infiax.com` | `A` | `129.213.54.54` | Beszel Hub Server Metrics Dashboard |
+| `status.example.com` | `A` | `203.0.113.10` | Uptime Kuma Status Page & Dashboard |
+| `monitor.example.com` | `A` | `203.0.113.10` | Beszel Hub Server Metrics Dashboard |
 
 > **Important DNS Notes:**
-> 1. Always use a hyphen (`dev-monitor`), **never an underscore (`dev_monitor`)**. Underscores violate RFC 1123 hostname rules and are rejected by Let's Encrypt ACME certificate authorities.
+> 1. Always use hyphens (`dev-monitor`), **never underscores (`dev_monitor`)**. Underscores violate RFC 1123 hostname rules and are rejected by Let's Encrypt ACME certificate authorities.
 > 2. Ensure there are **no conflicting IPv6 `AAAA` records** on either subdomain unless IPv6 is actively routed to your VPS. Let's Encrypt prefers IPv6 when an `AAAA` record exists.
 
 ---
@@ -57,9 +57,9 @@ For automated provisioning with custom domains:
 
 ```bash
 sudo bash install.sh --yes \
-  --status-domain status.infiax.com \
-  --beszel-domain dev-monitor.infiax.com \
-  --acme-email admin@infiax.com
+  --status-domain status.example.com \
+  --beszel-domain monitor.example.com \
+  --acme-email admin@example.com
 ```
 
 ---
@@ -78,8 +78,8 @@ sudo bash install.sh --yes \
 ## 5. Post-Installation Steps
 
 1. **Create Admin Accounts Immediately**:
-   - Open `https://status.infiax.com` and create your Uptime Kuma administrator account.
-   - Open `https://dev-monitor.infiax.com` and create your Beszel Hub administrator account.
+   - Open `https://status.example.com` and create your Uptime Kuma administrator account.
+   - Open `https://monitor.example.com` and create your Beszel Hub administrator account.
 2. **Pair the Local Beszel Agent**:
    - In Beszel Hub, click **+ Add System**.
    - Enter Name: `infiax-vps` (or your hostname) and **Host / IP**: `/beszel_socket/beszel.sock`.

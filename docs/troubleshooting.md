@@ -12,15 +12,15 @@ sudo /opt/infiax-status-monitor/monitor.sh troubleshoot
 ## 1. HTTPS Certificate Acquisition Fails in Caddy
 
 ### Symptoms
-Browser shows `SSL_ERROR_INTERNAL_ERROR_ALERT` or connection refused on `https://status.infiax.com` or `https://dev-monitor.infiax.com`.
+Browser shows `SSL_ERROR_INTERNAL_ERROR_ALERT` or connection refused on `https://status.example.com` or `https://monitor.example.com`.
 
 ### Checklist & Remediation
 1. **Check DNS `A` Records**:
-   Run `sudo ./monitor.sh preflight` and verify that both `status.infiax.com` and `dev-monitor.infiax.com` resolve to `129.213.54.54`.
+   Run `sudo ./monitor.sh preflight` and verify that both `status.example.com` and `monitor.example.com` resolve to your VPS public IPv4 (e.g., `203.0.113.10`).
 2. **Check for Conflicting IPv6 `AAAA` Records**:
    If a domain has an `AAAA` record pointing to an unrouted IPv6 address or registrar parking page, Let's Encrypt HTTP-01 validation will fail. Remove any `AAAA` records in your DNS provider if IPv6 is not configured on your VPS.
 3. **Check Hostname Syntax**:
-   Ensure the domain uses hyphens (`dev-monitor.infiax.com`), never underscores (`dev_monitor.infiax.com`).
+   Ensure the domain uses hyphens (`dev-monitor.example.com`), never underscores (`dev_monitor.example.com`).
 4. **Verify Oracle VCN Security List & `iptables`**:
    Confirm TCP ports `80` and `443` are open in both the Oracle Cloud VCN Ingress Security Rules and host `iptables INPUT` chain.
 5. **Inspect Caddy Logs**:

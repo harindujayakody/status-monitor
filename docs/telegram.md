@@ -33,7 +33,7 @@ Or choose **12. Telegram Setup Guide** from `sudo ./monitor.sh`:
 
 ## 3. Configure Uptime Kuma Notifications
 
-1. Log in to Uptime Kuma at `https://status.infiax.com`.
+1. Log in to Uptime Kuma at `https://status.example.com`.
 2. Navigate to **Settings** (top-right menu) -> **Notifications** -> **Setup Notification**.
 3. Configure the following fields:
    - **Notification Type**: `Telegram`
@@ -51,7 +51,7 @@ Or choose **12. Telegram Setup Guide** from `sudo ./monitor.sh`:
 
 Beszel Hub uses Shoutrrr notification URLs for resource threshold and recovery alerts.
 
-1. Log in to Beszel Hub at `https://dev-monitor.infiax.com`.
+1. Log in to Beszel Hub at `https://monitor.example.com`.
 2. Navigate to **Settings** (gear icon) -> **Notifications**.
 3. Under **Webhook / Notification URLs**, add your Telegram Shoutrrr URL (generated for you by Menu Option 12):
    ```text
@@ -70,4 +70,4 @@ Beszel Hub uses Shoutrrr notification URLs for resource threshold and recovery a
 
 Because Uptime Kuma and Beszel Hub run **on** your VPS, a total power failure, hypervisor outage, or complete upstream network loss on that VPS will prevent the server from sending outbound Telegram messages about its own outage.
 
-**Best Practice**: Register `https://status.infiax.com` on a free external ping monitor or secondary node so you are alerted even if `129.213.54.54` becomes completely unreachable from the internet.
+**Best Practice**: Register `https://status.example.com` on a free external ping monitor or secondary node so you are alerted even if your VPS becomes completely unreachable from the internet.

@@ -403,14 +403,11 @@ format_msg_help() {
 🤖 <b>INFIAX MONITOR BOT</b>
 ────────────────
 
-Tap the <b>Menu</b> button in Telegram anytime to run a live check:
-
-📊 /status — Full Server, Network &amp; Container Summary
-⚡ /metrics — Live CPU, RAM, Swap &amp; Disk Bars
-🐳 /containers — Docker Container Health &amp; Memory
-🌐 /network — Outbound Ping Loss &amp; HTTPS Checks
-🔔 /alerts — Verify All 6 Beszel Alert Thresholds
-🤖 /help — Show This Command List
+📊 /status — Server Status
+⚡ /metrics — CPU, RAM &amp; Disk
+🐳 /containers — Containers
+🌐 /network — Network Ping
+🔔 /alerts — Alert Rules
 EOF
 }
 
@@ -429,12 +426,11 @@ register_bot_commands() {
 
     local commands_json
     commands_json='{"commands":[
-      {"command":"status","description":"📊 Full Server, Uptime & Container Overview"},
-      {"command":"metrics","description":"⚡ Live CPU, Memory, Swap & Disk Usage"},
-      {"command":"containers","description":"🐳 Docker Container Health & RAM"},
-      {"command":"network","description":"🌐 Network Latency, Packet Loss & HTTPS"},
-      {"command":"alerts","description":"🔔 Audit All 6 Alert Thresholds"},
-      {"command":"help","description":"🤖 Show Available Commands"}
+      {"command":"status","description":"📊 Server Status"},
+      {"command":"metrics","description":"⚡ CPU, RAM & Disk"},
+      {"command":"containers","description":"🐳 Containers"},
+      {"command":"network","description":"🌐 Network Ping"},
+      {"command":"alerts","description":"🔔 Alert Rules"}
     ]}'
 
     local resp
@@ -444,7 +440,7 @@ register_bot_commands() {
         "https://api.telegram.org/bot${token}/setMyCommands" 2>/dev/null || true)"
 
     if [[ "${resp}" == *'"ok":true'* ]]; then
-        msg_ok "Registered premade Telegram Menu commands (/status, /metrics, /containers, /network, /alerts, /help)."
+        msg_ok "Registered simplified Telegram Menu commands (/status, /metrics, /containers, /network, /alerts)."
         return 0
     else
         msg_error "Failed to register Telegram slash commands via setMyCommands."

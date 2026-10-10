@@ -7,9 +7,13 @@
 #   2. Unified message format covering Uptime Kuma websites + all 6 Beszel
 #      notification categories (Status, CPU, Memory, Disk, Network Loss,
 #      Container Health).
-#   3. Real-time state-change watcher for Uptime Kuma & Beszel alerts so every
-#      notification uses the unified Infiax message format.
-#   4. Automated 9:00 PM (Asia/Colombo) Everyday Full Report via systemd timer.
+#   3. Auto-vanishing command messages:
+#      - User's slash command bubble (/status, etc.) is deleted immediately.
+#      - Bot's previous on-demand command replies are deleted automatically.
+#      - Only Real-Time Alerts and Today's 9:00 PM Daily Report remain.
+#      - When a new Daily Report is sent, the previous Daily Report is deleted.
+#   4. iOS-safe Telegram Menu: includes a bottom spacer entry so the last real
+#      command is never blocked by the iOS floating input bar.
 # ==============================================================================
 
 set -euo pipefail
@@ -23,6 +27,15 @@ export TZ="Asia/Colombo"
 # --- Sri Lanka Timestamp Helper ---
 get_sl_timestamp() {
     TZ="Asia/Colombo" date '+%Y-%m-%d • %I:%M:%S %p (SLST)'
+}
+
+# --- State Directory Helper ---
+get_bot_state_dir() {
+    local rdir
+    rdir="$(get_runtime_dir)"
+    local sdir="${rdir}/data/beszel-agent"
+    mkdir -p "${sdir}" 2>/dev/null || true
+    printf '%s\n' "${sdir}"
 }
 
 # --- Host Uptime & Load Helpers ---
@@ -142,7 +155,7 @@ get_uptime_kuma_monitors_summary() {
         return 0
     fi
 
-    local line name st ping_ms up24 icon st_txt
+    local name st ping_ms up24 icon st_txt
     while IFS='|' read -r name st ping_ms up24; do
         [[ -z "${name}" ]] && continue
         if [[ "${st}" == "1" ]]; then
@@ -161,10 +174,6 @@ get_uptime_kuma_monitors_summary() {
 }
 
 # --- Unified All-Notifications Card Generator ---
-# Used by:
-#   - /status (Live Status)
-#   - /report & 9:00 PM Daily Report
-#   - Real-time Alert Trigger / Recovery Notifications
 format_unified_notification_card() {
     local header_title="${1:-🛡️ <b>INFIAX STATUS MONITOR</b>}"
     local event_banner="${2:-}"
@@ -319,36 +328,144 @@ format_msg_daily_report() {
 }
 
 format_msg_metrics() {
-    format_unified_notification_card "⚡ <b>RESOURCE TELEMETRY REPORT</b>"
+    local host_name ts_str
+    host_name="$(hostname 2>/dev/null || printf 'infiax-vps')"
+    ts_str="$(get_sl_timestamp)"
+
+    local cpu_pct ram_used ram_total ram_pct
+    cpu_pct="$(get_cpu_pct)"
+    ram_used="$(get_used_ram_mib)"
+    ram_total="$(get_total_ram_mib)"
+    ram_pct=0
+    if (( ram_total > 0 )); then
+        ram_pct=$(( (ram_used * 100) / ram_total ))
+    fi
+
+    local swap_used=0 swap_total=0 swap_pct=0
+    if [[ -r /proc/meminfo ]]; then
+        swap_total="$(awk '/^SwapTotal:/ {print int($2/1024)}' /proc/meminfo)"
+        local swap_free
+        swap_free="$(awk '/^SwapFree:/ {print int($2/1024)}' /proc/meminfo)"
+        swap_used=$(( swap_total - swap_free ))
+        if (( swap_total > 0 )); then
+            swap_pct=$(( (swap_used * 100) / swap_total ))
+        fi
+    fi
+
+    local disk_info disk_pct disk_used disk_total
+    disk_info="$(get_disk_summary)"
+    disk_pct="${disk_info%%|*}"
+    local disk_rest="${disk_info#*|}"
+    disk_used="${disk_rest%%|*}"
+    disk_total="${disk_rest#*|}"
+
+    cat <<EOF
+⚡ <b>CPU, RAM &amp; DISK TELEMETRY</b>
+🖥️ <b>Host:</b> <code>${host_name}</code> • <code>$(get_system_uptime)</code>
+────────────────
+
+$(metric_badge "${cpu_pct}" 65 80) <b>CPU Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
+• Load Average: <code>$(get_load_average)</code>
+
+$(metric_badge "${ram_pct}" 65 80) <b>Memory Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b>
+• Used: <code>${ram_used} MiB / ${ram_total} MiB</code>
+
+🟢 <b>Swap Space</b>
+<code>$(make_bar "${swap_pct}")</code> <b>${swap_pct}%</b>
+• Used: <code>${swap_used} MiB / ${swap_total} MiB</code>
+
+$(metric_badge "${disk_pct}" 65 80) <b>Disk Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b>
+• Used: <code>${disk_used} GB / ${disk_total} GB</code>
+
+🕒 <i>${ts_str}</i>
+EOF
 }
 
 format_msg_containers() {
-    format_unified_notification_card "🐳 <b>CONTAINER HEALTH REPORT</b>"
+    local ts_str
+    ts_str="$(get_sl_timestamp)"
+
+    local stats_raw
+    stats_raw="$(docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null || true)"
+
+    local lines=""
+    local cname
+    for cname in infiax-caddy infiax-uptime-kuma infiax-beszel-hub infiax-beszel-agent; do
+        local st hlth icon cpu_val mem_val
+        st="$(docker inspect -f '{{.State.Status}}' "${cname}" 2>/dev/null || printf 'stopped')"
+        hlth="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${cname}" 2>/dev/null || printf 'unknown')"
+        if [[ "${st}" == "running" && "${hlth}" == "healthy" ]]; then
+            icon="🟢"
+        elif [[ "${st}" == "running" ]]; then
+            icon="🟡"
+        else
+            icon="🔴"
+        fi
+        cpu_val="$(printf '%s\n' "${stats_raw}" | awk -F'|' -v c="${cname}" '$1==c {print $2}')"
+        mem_val="$(printf '%s\n' "${stats_raw}" | awk -F'|' -v c="${cname}" '$1==c {print $3}')"
+        [[ -z "${cpu_val}" ]] && cpu_val="0.00%"
+        [[ -z "${mem_val}" ]] && mem_val="N/A"
+
+        lines="${lines}${icon} <b>${cname}</b>
+   ├ State: <code>${st} (${hlth})</code>
+   └ Usage: <code>CPU ${cpu_val}</code> • <code>${mem_val}</code>
+
+"
+    done
+
+    cat <<EOF
+🐳 <b>DOCKER CONTAINER HEALTH</b>
+<i>Alert threshold: Unhealthy &gt; 10m</i>
+────────────────
+
+${lines}🕒 <i>${ts_str}</i>
+EOF
 }
 
 format_msg_network() {
-    format_unified_notification_card "🌐 <b>NETWORK &amp; UPTIME REPORT</b>"
+    local rdir
+    rdir="$(get_runtime_dir)"
+    local env_file="${rdir}/.env"
+    local status_domain beszel_domain
+    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
+    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
+
+    local net_info net_loss net_rtt
+    net_info="$(get_network_ping_summary)"
+    net_loss="${net_info%%|*}"
+    net_rtt="${net_info#*|}"
+    local net_icon
+    net_icon="$(metric_badge "${net_loss}" 5 10)"
+
+    local kuma_summary
+    kuma_summary="$(get_uptime_kuma_monitors_summary)"
+
+    cat <<EOF
+🌐 <b>NETWORK &amp; WEBSITE MONITORS</b>
+<i>Alert threshold: Packet Loss &gt; 10%</i>
+────────────────
+
+<b>🌐 Uptime Kuma Monitors</b>
+${kuma_summary}
+<b>📡 Outbound Latency Monitor (1.1.1.1)</b>
+${net_icon} <b>Packet Loss:</b> <code>${net_loss}%</code> <i>(Threshold: &lt; 10%)</i>
+⚡ <b>Avg Latency:</b> <code>${net_rtt} ms</code>
+
+🔗 <a href="https://${status_domain}">Status Page</a>  •  <a href="https://${beszel_domain}">Beszel Hub</a>
+🕒 <i>$(get_sl_timestamp)</i>
+EOF
 }
 
 format_msg_alerts() {
     format_unified_notification_card "🔔 <b>ALL NOTIFICATION RULES CHECK</b>"
 }
 
-format_msg_help() {
-    cat <<'EOF'
-🤖 <b>INFIAX MONITOR BOT</b>
-────────────────
-
-📊 /status — Live Full Status (All Notifications)
-📅 /report — Daily 9:00 PM Full Report
-⚡ /metrics — CPU, RAM &amp; Disk
-🐳 /containers — Container Health
-🌐 /network — Website &amp; Ping Status
-🔔 /alerts — Alert Rules Check
-EOF
-}
-
 # --- Register Premade Slash Commands with Telegram API (setMyCommands) ---
+# Includes a bottom spacer entry ('close') so iOS floating input bar never
+# covers the last real command ('alerts').
 register_bot_commands() {
     local rdir
     rdir="$(get_runtime_dir)"
@@ -363,12 +480,13 @@ register_bot_commands() {
 
     local commands_json
     commands_json='{"commands":[
-      {"command":"status","description":"📊 Server Status"},
-      {"command":"report","description":"📅 Full Report"},
+      {"command":"status","description":"📊 Full Status (All Metrics)"},
+      {"command":"report","description":"📅 Daily 9PM Full Report"},
       {"command":"metrics","description":"⚡ CPU, RAM & Disk"},
-      {"command":"containers","description":"🐳 Containers"},
-      {"command":"network","description":"🌐 Network Ping"},
-      {"command":"alerts","description":"🔔 Alert Rules"}
+      {"command":"containers","description":"🐳 Container Health"},
+      {"command":"network","description":"🌐 Website & Ping Status"},
+      {"command":"alerts","description":"🔔 Alert Rules Check"},
+      {"command":"close","description":"⬆️ Tap Any Command Above"}
     ]}'
 
     local resp
@@ -378,7 +496,7 @@ register_bot_commands() {
         "https://api.telegram.org/bot${token}/setMyCommands" 2>/dev/null || true)"
 
     if [[ "${resp}" == *'"ok":true'* ]]; then
-        msg_ok "Registered simplified Telegram Menu commands (/status, /report, /metrics, /containers, /network, /alerts)."
+        msg_ok "Registered iOS-safe Telegram Menu commands."
         return 0
     else
         msg_error "Failed to register Telegram slash commands via setMyCommands."
@@ -386,28 +504,87 @@ register_bot_commands() {
     fi
 }
 
-# --- Send Clean Telegram Message ---
+# --- Delete a Telegram Message by ID ---
+delete_telegram_msg() {
+    local token="$1"
+    local chat_id="$2"
+    local msg_id="$3"
+    [[ -z "${msg_id}" || ! "${msg_id}" =~ ^[0-9]+$ ]] && return 0
+    curl -fsSL --max-time 5 -X POST \
+        "https://api.telegram.org/bot${token}/deleteMessage" \
+        -d "chat_id=${chat_id}" \
+        -d "message_id=${msg_id}" >/dev/null 2>&1 || true
+}
+
+# --- Delete All Previous Transient Command Reply Messages ---
+purge_transient_bot_msgs() {
+    local token="$1"
+    local chat_id="$2"
+    local state_dir
+    state_dir="$(get_bot_state_dir)"
+    local transient_file="${state_dir}/.bot_transient_msg_ids"
+    if [[ -f "${transient_file}" ]]; then
+        local mid
+        while IFS= read -r mid; do
+            [[ -n "${mid}" ]] && delete_telegram_msg "${token}" "${chat_id}" "${mid}"
+        done < "${transient_file}"
+        rm -f "${transient_file}"
+    fi
+}
+
+# --- Record a Transient Command Reply Message ID ---
+record_transient_bot_msg() {
+    local msg_id="$1"
+    [[ -z "${msg_id}" || ! "${msg_id}" =~ ^[0-9]+$ ]] && return 0
+    local state_dir
+    state_dir="$(get_bot_state_dir)"
+    printf '%s\n' "${msg_id}" >> "${state_dir}/.bot_transient_msg_ids"
+}
+
+# --- Send Telegram Message and Return Its message_id ---
 send_bot_reply() {
     local token="$1"
     local chat_id="$2"
     local text_html="$3"
-    local edit_msg_id="${4:-}"
 
-    if [[ -n "${edit_msg_id}" ]]; then
-        curl -fsSL --max-time 10 -X POST \
-            "https://api.telegram.org/bot${token}/editMessageText" \
-            -d "chat_id=${chat_id}" \
-            -d "message_id=${edit_msg_id}" \
-            -d "parse_mode=HTML" \
-            -d "disable_web_page_preview=true" \
-            --data-urlencode "text=${text_html}" >/dev/null 2>&1 || true
-    else
-        curl -fsSL --max-time 10 -X POST \
-            "https://api.telegram.org/bot${token}/sendMessage" \
-            -d "chat_id=${chat_id}" \
-            -d "parse_mode=HTML" \
-            -d "disable_web_page_preview=true" \
-            --data-urlencode "text=${text_html}" >/dev/null 2>&1 || true
+    local resp
+    resp="$(curl -fsSL --max-time 10 -X POST \
+        "https://api.telegram.org/bot${token}/sendMessage" \
+        -d "chat_id=${chat_id}" \
+        -d "parse_mode=HTML" \
+        -d "disable_web_page_preview=true" \
+        --data-urlencode "text=${text_html}" 2>/dev/null || true)"
+
+    printf '%s' "${resp}" | jq -r '.result.message_id // empty' 2>/dev/null || true
+}
+
+# --- Send Daily Report (Deletes Previous Daily Report + Transient Command Msgs) ---
+send_daily_report_Replacing_old() {
+    local token="$1"
+    local chat_id="$2"
+    local state_dir
+    state_dir="$(get_bot_state_dir)"
+    local report_id_file="${state_dir}/.bot_last_report_msg_id"
+
+    # 1. Delete previous Daily Report if present
+    if [[ -f "${report_id_file}" ]]; then
+        local old_rep_id
+        old_rep_id="$(cat "${report_id_file}" 2>/dev/null || true)"
+        if [[ -n "${old_rep_id}" ]]; then
+            delete_telegram_msg "${token}" "${chat_id}" "${old_rep_id}"
+        fi
+        rm -f "${report_id_file}"
+    fi
+
+    # 2. Delete any transient command messages so only Alerts & Today's Report remain
+    purge_transient_bot_msgs "${token}" "${chat_id}"
+
+    # 3. Send today's Daily Report and save its message_id
+    local html new_id
+    html="$(format_msg_daily_report)"
+    new_id="$(send_bot_reply "${token}" "${chat_id}" "${html}")"
+    if [[ -n "${new_id}" && "${new_id}" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "${new_id}" > "${report_id_file}"
     fi
 }
 
@@ -418,9 +595,6 @@ dispatch_bot_command() {
     case "${cmd}" in
         /status|cmd_status)
             format_msg_status
-            ;;
-        /report|/daily|cmd_report)
-            format_msg_daily_report
             ;;
         /metrics|/resources|cmd_metrics)
             format_msg_metrics
@@ -434,22 +608,21 @@ dispatch_bot_command() {
         /alerts|cmd_alerts)
             format_msg_alerts
             ;;
-        /start|/help|cmd_help|*)
-            format_msg_help
+        *)
+            format_msg_status
             ;;
     esac
 }
 
 # --- Check for Real-Time Alert State Changes (Beszel + Uptime Kuma) ---
-# Sends a unified formatted notification card whenever any Uptime Kuma website
-# or Beszel alert changes state (Triggered <-> Resolved).
+# Alert messages are NEVER added to transient/report files so they STAY permanently!
 check_and_notify_alert_transitions() {
     local token="$1"
     local chat_id="$2"
     local rdir
     rdir="$(get_runtime_dir)"
-    local state_dir="${rdir}/data/beszel-agent"
-    mkdir -p "${state_dir}" 2>/dev/null || true
+    local state_dir
+    state_dir="$(get_bot_state_dir)"
     local prev_file="${state_dir}/.alert_state_snapshot"
 
     local current_state=""
@@ -485,7 +658,6 @@ check_and_notify_alert_transitions() {
         return 0
     fi
 
-    # Detect which specific item changed
     local key val old_val
     while IFS=':' read -r key val; do
         [[ -z "${key}" ]] && continue
@@ -509,7 +681,8 @@ check_and_notify_alert_transitions() {
                 fi
             fi
             if [[ -n "${html_alert}" ]]; then
-                send_bot_reply "${token}" "${chat_id}" "${html_alert}"
+                # Alerts stay permanently (not recorded as transient)
+                send_bot_reply "${token}" "${chat_id}" "${html_alert}" >/dev/null
             fi
         fi
     done <<< "${current_state}"
@@ -533,7 +706,7 @@ run_bot_daemon() {
     fi
 
     register_bot_commands || true
-    msg_info "Starting Infiax Telegram Bot long-polling responder (TZ=Asia/Colombo) for Chat ID ${allowed_chat}..."
+    msg_info "Starting Infiax Telegram Bot responder (TZ=Asia/Colombo, Auto-Vanish enabled)..."
 
     local offset=0
     local init_resp
@@ -550,7 +723,6 @@ run_bot_daemon() {
         token="$(get_env_val "TELEGRAM_BOT_TOKEN" "${token}" "${env_file}")"
         allowed_chat="$(get_env_val "TELEGRAM_CHAT_ID" "${allowed_chat}" "${env_file}")"
 
-        # Check for real-time alert transitions
         check_and_notify_alert_transitions "${token}" "${allowed_chat}" || true
 
         local updates
@@ -569,41 +741,44 @@ run_bot_daemon() {
 
         local i
         for (( i = 0; i < count; i++ )); do
-            local upd_id msg_chat_id msg_text cb_id cb_chat_id cb_msg_id cb_data
+            local upd_id msg_id msg_chat_id msg_text
             upd_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].update_id" 2>/dev/null || true)"
             if [[ -n "${upd_id}" && "${upd_id}" =~ ^[0-9]+$ ]]; then
                 offset=$(( upd_id + 1 ))
             fi
 
+            msg_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].message.message_id // empty" 2>/dev/null || true)"
             msg_chat_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].message.chat.id // empty" 2>/dev/null || true)"
             msg_text="$(printf '%s' "${updates}" | jq -r ".result[${i}].message.text // empty" 2>/dev/null || true)"
-
-            cb_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.id // empty" 2>/dev/null || true)"
-            cb_chat_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.message.chat.id // empty" 2>/dev/null || true)"
-            cb_msg_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.message.message_id // empty" 2>/dev/null || true)"
-            cb_data="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.data // empty" 2>/dev/null || true)"
 
             if [[ -n "${msg_chat_id}" && -n "${msg_text}" ]]; then
                 if [[ "${msg_chat_id}" != "${allowed_chat}" ]]; then
                     log_event "WARN" "Ignored unauthorized Telegram command from chat_id=${msg_chat_id}"
                     continue
                 fi
-                local reply_html
-                reply_html="$(dispatch_bot_command "${msg_text}")"
-                send_bot_reply "${token}" "${allowed_chat}" "${reply_html}"
-            fi
 
-            if [[ -n "${cb_id}" && -n "${cb_chat_id}" && -n "${cb_data}" ]]; then
-                if [[ "${cb_chat_id}" != "${allowed_chat}" ]]; then
+                # 1. Immediately vanish the user's command bubble (/status, etc.)
+                delete_telegram_msg "${token}" "${allowed_chat}" "${msg_id}"
+
+                local clean_cmd="${msg_text%%@*}"
+                if [[ "${clean_cmd}" == "/close" ]]; then
+                    # Spacer row tapped: just purge transient messages and exit
+                    purge_transient_bot_msgs "${token}" "${allowed_chat}"
+                    continue
+                elif [[ "${clean_cmd}" == "/report" || "${clean_cmd}" == "/daily" ]]; then
+                    # Daily report requested: replace previous daily report & purge transient msgs
+                    send_daily_report_Replacing_old "${token}" "${allowed_chat}"
                     continue
                 fi
-                curl -fsSL --max-time 5 -X POST \
-                    "https://api.telegram.org/bot${token}/answerCallbackQuery" \
-                    -d "callback_query_id=${cb_id}" >/dev/null 2>&1 || true
 
-                local edited_html
-                edited_html="$(dispatch_bot_command "${cb_data}")"
-                send_bot_reply "${token}" "${allowed_chat}" "${edited_html}" "${cb_msg_id}"
+                # 2. Delete previous transient bot command reply messages
+                purge_transient_bot_msgs "${token}" "${allowed_chat}"
+
+                # 3. Send fresh reply and record its message_id as transient
+                local reply_html sent_msg_id
+                reply_html="$(dispatch_bot_command "${clean_cmd}")"
+                sent_msg_id="$(send_bot_reply "${token}" "${allowed_chat}" "${reply_html}")"
+                record_transient_bot_msg "${sent_msg_id}"
             fi
         done
     done
@@ -625,14 +800,16 @@ send_interactive_status_card() {
     fi
 
     register_bot_commands || true
-    local html
     if [[ "${mode}" == "report" ]]; then
-        html="$(format_msg_daily_report)"
+        send_daily_report_Replacing_old "${token}" "${chat_id}"
     else
+        purge_transient_bot_msgs "${token}" "${chat_id}"
+        local html sent_id
         html="$(format_msg_status)"
+        sent_id="$(send_bot_reply "${token}" "${chat_id}" "${html}")"
+        record_transient_bot_msg "${sent_id}"
     fi
-    send_bot_reply "${token}" "${chat_id}" "${html}"
-    msg_ok "Sent live ${mode} card to Telegram (Sri Lanka Time)!"
+    msg_ok "Sent live ${mode} card to Telegram (auto-vanish & SLST active)!"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

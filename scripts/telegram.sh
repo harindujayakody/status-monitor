@@ -216,23 +216,18 @@ send_telegram_test_notification() {
     # shellcheck source=scripts/telegram-bot.sh
     source "${SCRIPT_DIR}/telegram-bot.sh"
 
-    msg_info "Registering premade Telegram slash commands (/status, /metrics, /containers, /network, /alerts, /help)..."
+    msg_info "Registering iOS-safe Telegram Menu commands..."
     register_bot_commands || true
     enable_telegram_bot_service || true
 
     msg_info "Sending live status card to Chat ID '${chat_id}'..."
-    local html_payload
+    purge_transient_bot_msgs "${token}" "${chat_id}"
+    local html_payload sent_id
     html_payload="$(format_msg_status)"
+    sent_id="$(send_bot_reply "${token}" "${chat_id}" "${html_payload}")"
 
-    local response=""
-    response="$(curl -fsSL --max-time 10 -X POST \
-        "https://api.telegram.org/bot${token}/sendMessage" \
-        -d "chat_id=${chat_id}" \
-        -d "parse_mode=HTML" \
-        -d "disable_web_page_preview=true" \
-        --data-urlencode "text=${html_payload}" 2>/dev/null || true)"
-
-    if [[ "${response}" == *'"ok":true'* ]]; then
+    if [[ -n "${sent_id}" && "${sent_id}" =~ ^[0-9]+$ ]]; then
+        record_transient_bot_msg "${sent_id}"
         msg_ok "Live Telegram status card delivered & Menu commands activated!"
         return 0
     else

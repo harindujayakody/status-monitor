@@ -2,9 +2,9 @@
 # ==============================================================================
 # Infiax Status Monitor — Interactive Telegram Bot & Command Responder
 # ==============================================================================
-# Registers premade Telegram slash commands (setMyCommands) and runs a
-# lightweight, zero-port long-polling daemon that responds to slash commands and
-# inline button taps with emoji-rich live server telemetry.
+# Registers premade Telegram slash commands (setMyCommands) for the native
+# Telegram Menu button and runs a lightweight, zero-port long-polling daemon
+# that replies to user-selected menu commands with clean, emoji-rich telemetry.
 #
 # Security:
 #   - Outbound HTTPS only (zero public ports opened).
@@ -34,7 +34,7 @@ get_load_average() {
     fi
 }
 
-# --- Visual Bar Helper (10 blocks) ---
+# --- Visual Bar Helper (10 blocks, mobile-friendly on iOS/Android) ---
 make_bar() {
     local pct="${1:-0}"
     if (( pct < 0 )); then pct=0; fi
@@ -44,8 +44,8 @@ make_bar() {
     local empty=$(( 10 - filled ))
     local bar=""
     local i
-    for (( i = 0; i < filled; i++ )); do bar="${bar}▰"; done
-    for (( i = 0; i < empty; i++ )); do bar="${bar}▱"; done
+    for (( i = 0; i < filled; i++ )); do bar="${bar}█"; done
+    for (( i = 0; i < empty; i++ )); do bar="${bar}░"; done
     printf '%s' "${bar}"
 }
 
@@ -105,34 +105,6 @@ get_network_ping_summary() {
     [[ -z "${loss}" ]] && loss="0"
     [[ -z "${rtt}" ]] && rtt="1.2"
     printf '%s|%s\n' "${loss}" "${rtt}"
-}
-
-# --- Build Inline Keyboard JSON ---
-build_inline_keyboard() {
-    local status_domain="$1"
-    local beszel_domain="$2"
-    cat <<EOF
-{
-  "inline_keyboard": [
-    [
-      {"text": "📊 Full Status", "callback_data": "cmd_status"},
-      {"text": "⚡ CPU / RAM / Disk", "callback_data": "cmd_metrics"}
-    ],
-    [
-      {"text": "🐳 Containers", "callback_data": "cmd_containers"},
-      {"text": "🌐 Network Ping", "callback_data": "cmd_network"}
-    ],
-    [
-      {"text": "🔔 Alert Rules Check", "callback_data": "cmd_alerts"},
-      {"text": "🔄 Refresh", "callback_data": "cmd_status"}
-    ],
-    [
-      {"text": "🟢 Open Uptime Kuma", "url": "https://${status_domain}"},
-      {"text": "📈 Open Beszel Hub", "url": "https://${beszel_domain}"}
-    ]
-  ]
-}
-EOF
 }
 
 # --- Format Message: /status (Full Overview) ---
@@ -198,24 +170,24 @@ format_msg_status() {
     cat <<EOF
 🛡️ <b>INFIAX STATUS MONITOR</b>
 ${stack_badge}
-━━━━━━━━━━━━━━━━━━━━━━
+────────────────
 
 🖥️ <b>Host:</b> <code>${host_name}</code>
 ⏱️ <b>Uptime:</b> <code>${uptime_str}</code>
-📈 <b>Load Avg:</b> <code>${load_str}</code>
+📈 <b>Load:</b> <code>${load_str}</code>
 
 <b>⚡ Resource Telemetry</b>
-${cpu_icon} <b>CPU:</b>   <code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
-${ram_icon} <b>RAM:</b>   <code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b> <i>(${ram_used}/${ram_total} MiB)</i>
-${disk_icon} <b>Disk:</b>  <code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b> <i>(${disk_used}/${disk_total} GB)</i>
-💾 <b>Swap:</b>  <code>${swap_total} MiB Configured</code>
+${cpu_icon} <b>CPU:</b>  <code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
+${ram_icon} <b>RAM:</b>  <code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b> <i>(${ram_used}/${ram_total} MiB)</i>
+${disk_icon} <b>Disk:</b> <code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b> <i>(${disk_used}/${disk_total} GB)</i>
+💾 <b>Swap:</b> <code>${swap_total} MiB Configured</code>
 
 <b>🌐 Network &amp; Containers</b>
 ${net_icon} <b>Ping (1.1.1.1):</b> <code>${net_rtt} ms</code> • <code>${net_loss}% loss</code>
 🐳 <b>Containers:</b> <code>${healthy_cnt}/${total_cnt} Healthy</code>
 
 🔗 <a href="https://${status_domain}">Uptime Kuma</a>  •  <a href="https://${beszel_domain}">Beszel Hub</a>
-🕒 <i>Updated: ${ts_str}</i>
+🕒 <i>${ts_str}</i>
 EOF
 }
 
@@ -255,7 +227,7 @@ format_msg_metrics() {
     cat <<EOF
 ⚡ <b>SERVER RESOURCE TELEMETRY</b>
 🖥️ <b>Host:</b> <code>${host_name}</code>
-━━━━━━━━━━━━━━━━━━━━━━
+────────────────
 
 $(metric_badge "${cpu_pct}" 65 80) <b>CPU Usage</b> <i>(Alert &gt; 80% for 10m)</i>
 <code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
@@ -312,8 +284,8 @@ format_msg_containers() {
 
     cat <<EOF
 🐳 <b>DOCKER CONTAINER HEALTH</b>
-<i>Alert threshold: Unhealthy &gt; 10 minutes</i>
-━━━━━━━━━━━━━━━━━━━━━━
+<i>Alert threshold: Unhealthy &gt; 10m</i>
+────────────────
 
 ${lines}🕒 <i>Checked at ${ts_str}</i>
 EOF
@@ -345,7 +317,7 @@ format_msg_network() {
     cat <<EOF
 🌐 <b>NETWORK &amp; ENDPOINT TELEMETRY</b>
 <i>Alert threshold: Packet Loss &gt; 10%</i>
-━━━━━━━━━━━━━━━━━━━━━━
+────────────────
 
 <b>📡 Outbound Latency Monitor (1.1.1.1)</b>
 ${net_icon} <b>Packet Loss:</b> <code>${net_loss}%</code> <i>(Threshold: &lt; 10%)</i>
@@ -396,8 +368,8 @@ format_msg_alerts() {
     if (( unhealthy_cnt > 0 )); then c_icon="🔴"; fi
 
     cat <<EOF
-🔔 <b>ACTIVE ALERT RULES &amp; THRESHOLD CHECK</b>
-━━━━━━━━━━━━━━━━━━━━━━
+🔔 <b>ACTIVE ALERT RULES CHECK</b>
+────────────────
 
 🟢 <b>1. System Status</b>
    • Rule: <i>Down for 10 minutes</i>
@@ -428,19 +400,17 @@ EOF
 # --- Format Message: /help or /start ---
 format_msg_help() {
     cat <<'EOF'
-🤖 <b>INFIAX MONITOR BOT — COMMAND MENU</b>
-━━━━━━━━━━━━━━━━━━━━━━
+🤖 <b>INFIAX MONITOR BOT</b>
+────────────────
 
-Use the <b>Menu</b> button or tap any shortcut below for instant live telemetry:
+Tap the <b>Menu</b> button in Telegram anytime to run a live check:
 
 📊 /status — Full Server, Network &amp; Container Summary
 ⚡ /metrics — Live CPU, RAM, Swap &amp; Disk Bars
 🐳 /containers — Docker Container Health &amp; Memory
 🌐 /network — Outbound Ping Loss &amp; HTTPS Checks
 🔔 /alerts — Verify All 6 Beszel Alert Thresholds
-🤖 /help — Show This Interactive Command Menu
-
-<i>🔒 Security: This bot responds exclusively to your authorized Admin Chat ID.</i>
+🤖 /help — Show This Command List
 EOF
 }
 
@@ -464,7 +434,7 @@ register_bot_commands() {
       {"command":"containers","description":"🐳 Docker Container Health & RAM"},
       {"command":"network","description":"🌐 Network Latency, Packet Loss & HTTPS"},
       {"command":"alerts","description":"🔔 Audit All 6 Alert Thresholds"},
-      {"command":"help","description":"🤖 Interactive Command Menu & Shortcuts"}
+      {"command":"help","description":"🤖 Show Available Commands"}
     ]}'
 
     local resp
@@ -474,7 +444,7 @@ register_bot_commands() {
         "https://api.telegram.org/bot${token}/setMyCommands" 2>/dev/null || true)"
 
     if [[ "${resp}" == *'"ok":true'* ]]; then
-        msg_ok "Registered premade Telegram slash commands (/status, /metrics, /containers, /network, /alerts, /help)."
+        msg_ok "Registered premade Telegram Menu commands (/status, /metrics, /containers, /network, /alerts, /help)."
         return 0
     else
         msg_error "Failed to register Telegram slash commands via setMyCommands."
@@ -482,22 +452,12 @@ register_bot_commands() {
     fi
 }
 
-# --- Send or Edit Telegram Message with Inline Buttons ---
+# --- Send Clean Telegram Message (No persistent inline button clutter) ---
 send_bot_reply() {
     local token="$1"
     local chat_id="$2"
     local text_html="$3"
     local edit_msg_id="${4:-}"
-
-    local rdir
-    rdir="$(get_runtime_dir)"
-    local env_file="${rdir}/.env"
-    local status_domain beszel_domain
-    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
-    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
-
-    local reply_markup
-    reply_markup="$(build_inline_keyboard "${status_domain}" "${beszel_domain}")"
 
     if [[ -n "${edit_msg_id}" ]]; then
         curl -fsSL --max-time 10 -X POST \
@@ -506,16 +466,14 @@ send_bot_reply() {
             -d "message_id=${edit_msg_id}" \
             -d "parse_mode=HTML" \
             -d "disable_web_page_preview=true" \
-            --data-urlencode "text=${text_html}" \
-            --data-urlencode "reply_markup=${reply_markup}" >/dev/null 2>&1 || true
+            --data-urlencode "text=${text_html}" >/dev/null 2>&1 || true
     else
         curl -fsSL --max-time 10 -X POST \
             "https://api.telegram.org/bot${token}/sendMessage" \
             -d "chat_id=${chat_id}" \
             -d "parse_mode=HTML" \
             -d "disable_web_page_preview=true" \
-            --data-urlencode "text=${text_html}" \
-            --data-urlencode "reply_markup=${reply_markup}" >/dev/null 2>&1 || true
+            --data-urlencode "text=${text_html}" >/dev/null 2>&1 || true
     fi
 }
 
@@ -624,8 +582,7 @@ run_bot_daemon() {
                 fi
                 curl -fsSL --max-time 5 -X POST \
                     "https://api.telegram.org/bot${token}/answerCallbackQuery" \
-                    -d "callback_query_id=${cb_id}" \
-                    --data-urlencode "text=⚡ Updated live telemetry" >/dev/null 2>&1 || true
+                    -d "callback_query_id=${cb_id}" >/dev/null 2>&1 || true
 
                 local edited_html
                 edited_html="$(dispatch_bot_command "${cb_data}")"
@@ -635,7 +592,7 @@ run_bot_daemon() {
     done
 }
 
-# --- Send Interactive Dashboard Card Immediately ---
+# --- Send Clean Status Card Immediately ---
 send_interactive_status_card() {
     local rdir
     rdir="$(get_runtime_dir)"
@@ -653,7 +610,7 @@ send_interactive_status_card() {
     local html
     html="$(format_msg_status)"
     send_bot_reply "${token}" "${chat_id}" "${html}"
-    msg_ok "Sent interactive status dashboard card with inline buttons to Telegram!"
+    msg_ok "Sent live status card to Telegram!"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

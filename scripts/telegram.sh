@@ -191,12 +191,9 @@ send_telegram_test_notification() {
     register_bot_commands || true
     enable_telegram_bot_service || true
 
-    msg_info "Sending interactive live status card with inline buttons to Chat ID '${chat_id}'..."
-    local html_payload reply_markup status_domain beszel_domain
-    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
-    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
+    msg_info "Sending live status card to Chat ID '${chat_id}'..."
+    local html_payload
     html_payload="$(format_msg_status)"
-    reply_markup="$(build_inline_keyboard "${status_domain}" "${beszel_domain}")"
 
     local response=""
     response="$(curl -fsSL --max-time 10 -X POST \
@@ -204,11 +201,10 @@ send_telegram_test_notification() {
         -d "chat_id=${chat_id}" \
         -d "parse_mode=HTML" \
         -d "disable_web_page_preview=true" \
-        --data-urlencode "text=${html_payload}" \
-        --data-urlencode "reply_markup=${reply_markup}" 2>/dev/null || true)"
+        --data-urlencode "text=${html_payload}" 2>/dev/null || true)"
 
     if [[ "${response}" == *'"ok":true'* ]]; then
-        msg_ok "Interactive Telegram dashboard delivered & premade slash commands activated!"
+        msg_ok "Live Telegram status card delivered & Menu commands activated!"
         return 0
     else
         msg_error "Failed to deliver Telegram notification. Verify your Bot Token, Chat ID, and outbound HTTPS connectivity."

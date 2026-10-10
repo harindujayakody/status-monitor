@@ -19,7 +19,7 @@ install_host_dependencies() {
 
     local missing_pkgs=()
     local pkg
-    for pkg in ca-certificates curl gnupg lsb-release dnsutils jq sqlite3 tar; do
+    for pkg in ca-certificates curl gnupg lsb-release dnsutils jq sqlite3 tar git; do
         if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
             missing_pkgs+=("${pkg}")
         fi

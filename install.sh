@@ -209,7 +209,9 @@ run_installer() {
     msg_step "5/6" "Starting monitoring containers and syncing Beszel Agent key..."
     start_services
     wait_for_stack_initialization 45
-    auto_sync_beszel_key 2>/dev/null && run_compose up -d beszel-agent >/dev/null 2>&1 || true
+    if auto_sync_beszel_key 2>/dev/null; then
+        run_compose up -d beszel-agent >/dev/null 2>&1 || true
+    fi
 
     # Steps 22-23: Perform health checks & verify HTTPS
     msg_step "6/6" "Running post-install health and HTTPS verification..."

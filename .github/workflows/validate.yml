@@ -38,7 +38,8 @@ jobs:
 
       - name: Validate YAML formatting
         run: |
-          yamllint -d "{extends: default, rules: {line-length: {max: 140}, document-start: disable}}" compose.yaml .github/workflows/validate.yml
+          yamllint -d "{extends: default, rules: {line-length: {max: 140}, document-start: disable, truthy: disable}}" \
+            compose.yaml .github/workflows/validate.yml
 
       - name: Validate Docker Compose configuration
         run: |

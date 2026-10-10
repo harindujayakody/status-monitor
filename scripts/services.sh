@@ -167,7 +167,11 @@ view_service_logs() {
                 local logfile
                 logfile="$(get_log_file)"
                 msg_info "Showing last ${tail_lines} lines of ${logfile}:"
-                [[ -f "${logfile}" ]] && tail -n "${tail_lines}" "${logfile}" || msg_info "Log file is empty."
+                if [[ -f "${logfile}" ]]; then
+                    tail -n "${tail_lines}" "${logfile}"
+                else
+                    msg_info "Log file is empty."
+                fi
                 return 0
                 ;;
             *) target_svc="" ;;

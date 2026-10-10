@@ -15,14 +15,14 @@ readonly _ISM_COMMON_LOADED=1
 set -euo pipefail
 
 # --- Project Constants ---
-readonly ISM_VERSION="1.0.0"
-readonly ISM_BRAND_NAME="INFIAX STATUS MONITOR"
-readonly ISM_REPO_URL="https://github.com/harindujayakody/status-monitor"
-readonly ISM_DEFAULT_INSTALL_DIR="/opt/infiax-status-monitor"
-readonly ISM_COMPOSE_PROJECT="infiax-status-monitor"
-readonly ISM_DEFAULT_STATUS_DOMAIN="status.infiax.com"
-readonly ISM_DEFAULT_BESZEL_DOMAIN="dev-monitor.infiax.com"
-readonly ISM_DEFAULT_SERVER_IPV4="129.213.54.54"
+export ISM_VERSION="1.0.0"
+export ISM_BRAND_NAME="INFIAX STATUS MONITOR"
+export ISM_REPO_URL="https://github.com/harindujayakody/status-monitor"
+export ISM_DEFAULT_INSTALL_DIR="/opt/infiax-status-monitor"
+export ISM_COMPOSE_PROJECT="infiax-status-monitor"
+export ISM_DEFAULT_STATUS_DOMAIN="status.infiax.com"
+export ISM_DEFAULT_BESZEL_DOMAIN="dev-monitor.infiax.com"
+export ISM_DEFAULT_SERVER_IPV4="129.213.54.54"
 
 # Resolve paths relative to this script
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +43,6 @@ C_RESET=""
 C_BOLD=""
 C_DIM=""
 C_BRAND=""
-C_BRAND_BG=""
 C_CYAN=""
 C_GREEN=""
 C_YELLOW=""
@@ -59,10 +58,8 @@ init_colors() {
         # Infiax brand primary color #0a66c2 (RGB: 10, 102, 194)
         if [[ "${COLORTERM:-}" == "truecolor" || "${COLORTERM:-}" == "24bit" ]]; then
             C_BRAND=$'\033[38;2;10;102;194m'
-            C_BRAND_BG=$'\033[48;2;10;102;194m\033[38;2;255;255;255m'
         else
             C_BRAND=$'\033[38;5;26m'
-            C_BRAND_BG=$'\033[48;5;26m\033[38;5;255m'
         fi
         C_CYAN=$'\033[36m'
         C_GREEN=$'\033[32m'
@@ -75,7 +72,6 @@ init_colors() {
         C_BOLD=""
         C_DIM=""
         C_BRAND=""
-        C_BRAND_BG=""
         C_CYAN=""
         C_GREEN=""
         C_YELLOW=""
@@ -151,8 +147,6 @@ draw_line() {
 
 print_banner() {
     local subtitle="${1:-Self-Hosted VPS Monitoring & Management System}"
-    local rdir
-    rdir="$(get_runtime_dir)"
     printf '\n'
     printf '%s%s  I N F I A X%s\n' "${C_BOLD}" "${C_BRAND}" "${C_RESET}"
     printf '%s%s  STATUS MONITOR%s %s(v%s)%s\n' "${C_BOLD}" "${C_WHITE}" "${C_RESET}" "${C_GRAY}" "${ISM_VERSION}" "${C_RESET}"
@@ -286,7 +280,7 @@ require_root() {
     fi
     if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
         msg_error "Root privileges are required for this operation."
-        msg_info "Please re-run with sudo: sudo $0 $*"
+        msg_info "Please re-run this command with sudo (e.g., sudo $0)."
         return 1
     fi
     return 0

@@ -2,7 +2,7 @@
 
 # Infiax Status Monitor
 
-**Production-Grade, Low-Memory Self-Hosted VPS & Uptime Monitoring Stack**
+**Self-Hosted Server & Website Monitoring — Runs on a 1 GiB VPS**
 
 [![Validate Stack](https://github.com/harindujayakody/status-monitor/actions/workflows/validate.yml/badge.svg)](https://github.com/harindujayakody/status-monitor/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0a66c2.svg)](LICENSE)
@@ -10,124 +10,120 @@
 [![Arch: AMD64 | ARM64](https://img.shields.io/badge/Arch-AMD64%20%7C%20ARM64-0a66c2.svg)](compose.yaml)
 [![RAM Footprint: ~215 MiB](https://img.shields.io/badge/RAM%20Footprint-~215%20MiB-2ea44f.svg)](compose.yaml)
 
-<p align="center">
-  <a href="#-architecture--security-model">Architecture</a> •
-  <a href="#-stack-components--resource-budget">Components</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-terminal-management-ui-infiax-monitor">Terminal UI</a> •
-  <a href="#-post-install-configuration">Post-Install Setup</a> •
-  <a href="#-documentation">Docs</a>
-</p>
-
 </div>
 
 ---
 
-**Infiax Status Monitor** is a turnkey, security-hardened monitoring platform engineered for **Ubuntu Server 22.04 / 24.04 LTS** across both `amd64` and `arm64` architectures—specifically tuned to run effortlessly on **1 GiB RAM micro instances** (such as Oracle Cloud `VM.Standard.E2.1.Micro`).
+**Infiax Status Monitor** is a self-hosted monitoring setup for your VPS. It watches your websites, tracks server health (CPU, RAM, disk), and sends you Telegram alerts when something goes wrong.
 
-It unifies **Uptime Kuma** (website, API, port, and SSL monitoring), **Beszel Hub & Agent** (lightweight server metrics, Docker container telemetry, and network latency tracking), and **Caddy** (automatic Let's Encrypt HTTPS/HTTP3 reverse proxy) behind an interactive terminal management suite (`infiax-monitor`).
-
----
-
-## ✨ Why Infiax Status Monitor?
-
-- ** Featherweight Memory Footprint (~215 MiB Total RAM)** — Replaces heavyweight Prometheus/Grafana/Chromium stacks with Go binaries and slim Node.js containers capped with explicit V8 heap and cgroup limits.
-- **🔒 Zero-Trust Private Networking** — Only Caddy binds to public ports (`80/tcp`, `443/tcp`, `443/udp`). Uptime Kuma (`:3001`) and Beszel Hub (`:8090`) remain isolated on an internal Docker bridge, and Beszel Agent communicates with Beszel Hub over a **shared Unix domain socket** (`/beszel_socket/beszel.sock`) with zero public agent ports.
-- **🛡️ Cloud Firewall & Oracle Cloud Safe** — Never flushes `iptables`, never touches Oracle Cloud's `InstanceServices` chain, never enables `ufw`, and never persists transient Docker chains into `/etc/iptables/rules.v4`.
-- **🚫 Search-Engine & Crawler Blocked by Default** — Automatically serves `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate` headers and a strict `/robots.txt` (`Disallow: /`) across all monitoring endpoints.
-- **🖥️ Interactive Terminal Control Center (`infiax-monitor`)** — 18 guided operations for installation, domain switching, Beszel key pairing, Telegram bot alerting, online SQLite backups, health checks, and safe uninstallation.
-- **💾 Verified Online SQLite Backups** — Uses `sqlite3 .backup` for hot database snapshots, verifies `PRAGMA integrity_check`, generates SHA-256 manifests, and creates automatic pre-restore/pre-update rollback archives.
+It's built to run on small servers — even a free Oracle Cloud micro instance with just 1 GiB of RAM works fine.
 
 ---
 
-## 📦 Stack Components & Resource Budget
+## What's included
 
-Measured on an Ubuntu 22.04 LTS micro VPS (~956 MiB physical RAM + 4 GiB swap):
-
-| Container | Image (Pinned) | Network Exposure | Typical RAM | Hard Limit | Purpose |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `infiax-caddy` | `caddy:2.11.7-alpine` | Public `80`, `443/tcp+udp` | ~30 MiB | `128 MiB` | Reverse proxy, Let's Encrypt TLS, HTTP/3, crawler blocking |
-| `infiax-uptime-kuma` | `louislam/uptime-kuma:2.5.6-slim` | Internal bridge `:3001` | ~150 MiB | `384 MiB` | HTTP(S), keyword, TCP port, DNS, and SSL expiry monitoring |
-| `infiax-beszel-hub` | `henrygd/beszel:0.21.0` | Internal bridge `:8090` | ~27 MiB | `192 MiB` | Server metrics dashboard, historical charts, threshold alerts |
-| `infiax-beszel-agent` | `henrygd/beszel-agent:0.21.0` | Unix socket (`beszel.sock`) | ~6 MiB | `128 MiB` | Host CPU, RAM, swap, disk I/O, network & container telemetry |
+- **Uptime Kuma** — checks if your websites are up, monitors SSL expiry, ports, and response time
+- **Beszel Hub + Agent** — shows live server stats like CPU, RAM, disk usage, and Docker container health
+- **Caddy** — handles HTTPS automatically using Let's Encrypt; the only service that's exposed to the internet
+- **Telegram Bot** — sends alerts and lets you check your server status by typing commands in Telegram
 
 ---
 
-## 🏗️ Architecture & Security Model
+## How the network is set up
 
 ```text
-                             Internet (HTTPS 443 / HTTP 80)
-                                           │
-                                           ▼
-                      ┌─────────────────────────────────────────┐
-                      │           Caddy Reverse Proxy           │
-                      │  • Automatic Let's Encrypt TLS & HTTP/3 │
-                      │  • HSTS + X-Robots-Tag (No-Index)       │
-                      │  • Built-in /robots.txt (Disallow: /)   │
-                      └───────────┬─────────────────┬───────────┘
-                                  │                 │
-           https://status.example.com             https://monitor.example.com
-            (Internal Bridge :3001)                 (Internal Bridge :8090)
-                                  │                 │
-                                  ▼                 ▼
-                      ┌───────────────────┐ ┌───────────────────┐
-                      │    Uptime Kuma    │ │    Beszel Hub     │
-                      │  (Status & HTTP)  │ │ (Metrics & Alerts)│
-                      └─────────┬─────────┘ └─────────┬─────────┘
-                                │                     │
-                                │             Shared Unix Socket
-                                │          (/beszel_socket/beszel.sock)
-                                │                     │
-                                │                     ▼
-                                │           ┌───────────────────┐
-                                │           │   Beszel Agent    │
-                                │           │ (Host & Container │
-                                │           │     Telemetry)    │
-                                │           └───────────────────┘
-                                │                     │
-                                └──────────┬──────────┘
-                                           │ Outbound HTTPS (443)
-                                           ▼
-                                ┌───────────────────────┐
-                                │   Telegram Bot API    │
-                                │  (Instant Alerting)   │
-                                └───────────────────────┘
+                         Internet (HTTPS 443 / HTTP 80)
+                                       │
+                                       ▼
+                    ┌─────────────────────────────────┐
+                    │         Caddy Reverse Proxy      │
+                    │  • Auto HTTPS via Let's Encrypt  │
+                    │  • Blocks search engine crawlers │
+                    └────────────┬──────────┬──────────┘
+                                 │          │
+             https://status.example.com   https://monitor.example.com
+                  (internal :3001)              (internal :8090)
+                                 │          │
+                                 ▼          ▼
+                    ┌──────────────┐  ┌──────────────┐
+                    │  Uptime Kuma │  │  Beszel Hub  │
+                    └──────────────┘  └──────┬───────┘
+                                             │
+                                       Unix Socket
+                                   (beszel_socket.sock)
+                                             │
+                                             ▼
+                                    ┌─────────────────┐
+                                    │  Beszel Agent   │
+                                    │ (Host & Docker) │
+                                    └────────┬────────┘
+                                             │
+                                    ┌────────▼────────┐
+                                    │  Telegram Bot   │
+                                    └─────────────────┘
 ```
+
+Only Caddy is open to the internet. Everything else talks internally — Beszel Agent connects to Beszel Hub through a Unix socket, so no extra ports are needed.
 
 ---
 
-## 🚀 Quick Start
+## Resource usage
 
-### 1. Prepare DNS Records
+Measured on Ubuntu 22.04 LTS with ~956 MiB RAM + 4 GiB swap:
 
-Create two **DNS `A` records** pointing to your server's public IPv4 address:
+| Container | Image | Typical RAM | Max Limit | What it does |
+| :--- | :--- | :--- | :--- | :--- |
+| `infiax-caddy` | `caddy:2.11.7-alpine` | ~30 MiB | 128 MiB | HTTPS proxy, TLS, crawler blocking |
+| `infiax-uptime-kuma` | `louislam/uptime-kuma:2.5.6-slim` | ~150 MiB | 384 MiB | Website & port monitoring |
+| `infiax-beszel-hub` | `henrygd/beszel:0.21.0` | ~27 MiB | 192 MiB | Server metrics dashboard |
+| `infiax-beszel-agent` | `henrygd/beszel-agent:0.21.0` | ~6 MiB | 128 MiB | Collects CPU, RAM, disk, container stats |
 
-| Hostname (Example) | Record | Target IPv4 | Routed Service |
+Total: around **215 MiB** on a quiet server.
+
+---
+
+## Before you install
+
+You need:
+- An Ubuntu 22.04 or 24.04 LTS server (amd64 or arm64)
+- At least 1 GiB RAM (512 MiB works too if you have swap)
+- Two domain names (or subdomains) pointing to your server's IP
+- Docker and Docker Compose installed (the installer checks this for you)
+- A Telegram bot token from [@BotFather](https://t.me/BotFather) if you want alerts
+
+---
+
+## Quick Start
+
+### 1. Set up DNS
+
+Create two DNS `A` records pointing to your server's public IP:
+
+| Subdomain | Record | Target | Goes to |
 | :--- | :--- | :--- | :--- |
-| `status.example.com` | `A` | `203.0.113.10` | **Uptime Kuma** (Status Page & Monitors) |
-| `monitor.example.com` | `A` | `203.0.113.10` | **Beszel Hub** (Server & Container Metrics) |
+| `status.example.com` | `A` | `203.0.113.10` | Uptime Kuma |
+| `monitor.example.com` | `A` | `203.0.113.10` | Beszel Hub |
 
 > [!IMPORTANT]
-> - **Use hyphens (`dev-monitor`), never underscores (`dev_monitor`)** — underscores are invalid in hostnames and rejected by Let's Encrypt.
-> - **Remove conflicting IPv6 `AAAA` records** unless IPv6 is actively routed on your VPS.
-> - **Cloudflare Users**: Set both records to **DNS Only (Grey Cloud)** during initial installation so Caddy can complete Let's Encrypt HTTP-01 validation, or set Cloudflare **SSL/TLS encryption mode** to **Full (strict)** once certificates are issued.
+> Use hyphens in subdomain names, not underscores — Let's Encrypt rejects underscores.
+> If you use Cloudflare, set both records to **DNS Only (grey cloud)** so Let's Encrypt can verify your domain.
 
-### 2. Run the One-Click Installer
+### 2. Run the installer
 
-Clone the repository onto your Ubuntu server and run `install.sh`:
+Clone the repo on your server and run the installer:
 
 ```bash
 git clone https://github.com/harindujayakody/status-monitor.git
 cd status-monitor
 
-# Optional: Run read-only preflight & compatibility checks without making changes
+# Check if your server is ready (no changes made)
 sudo bash install.sh --dry-run
 
-# Interactive production installation (deploys to /opt/infiax-status-monitor)
+# Install everything
 sudo bash install.sh
 ```
 
-Or deploy non-interactively with custom flags:
+Or run it without prompts:
 
 ```bash
 sudo bash install.sh --yes \
@@ -138,13 +134,15 @@ sudo bash install.sh --yes \
 
 ---
 
-## 🖥️ Terminal Management UI (`infiax-monitor`)
+## Management menu
 
-After installation, launch the interactive control panel from any directory:
+After installing, run this from anywhere:
 
 ```bash
 sudo infiax-monitor
 ```
+
+You'll see a menu like this:
 
 ```text
   I N F I A X
@@ -174,94 +172,91 @@ sudo infiax-monitor
   Select option [00-18]:
 ```
 
-### Non-Interactive CLI Subcommands
-
-Every menu operation can also be executed directly for scripts or cron jobs:
+You can also run things directly from the command line:
 
 ```bash
-sudo infiax-monitor info                  # System, CPU, RAM, swap & disk summary
-sudo infiax-monitor preflight             # DNS, port, resource & firewall audit
-sudo infiax-monitor status                # Container health & real-time memory usage
-sudo infiax-monitor logs                  # Tail logs across all containers
-sudo infiax-monitor logs caddy 100        # Tail last 100 lines of a specific service
-sudo infiax-monitor domains               # Update domains & reload Caddy TLS
-sudo infiax-monitor beszel-agent          # View or update Beszel Agent key/token
-sudo infiax-monitor telegram              # Guided Telegram Bot & Chat ID setup
-sudo infiax-monitor test-telegram         # Send a live test alert to Telegram
-sudo infiax-monitor backup                # Create verified online SQLite backup
-sudo infiax-monitor backup --list         # List available backup archives & checksums
-sudo infiax-monitor restore               # Restore from a verified backup archive
-sudo infiax-monitor update                # Pre-backup, pull images & recreate stack
-sudo infiax-monitor health                # Deep container, socket, DB & HTTPS check
-sudo infiax-monitor troubleshoot          # Automated root-cause diagnostics
-sudo infiax-monitor uninstall --dry-run   # Preview uninstallation without changes
+sudo infiax-monitor info           # System info summary
+sudo infiax-monitor status         # Container health & RAM usage
+sudo infiax-monitor logs           # Live logs from all containers
+sudo infiax-monitor backup         # Create a database backup
+sudo infiax-monitor restore        # Restore from a backup
+sudo infiax-monitor telegram       # Set up Telegram alerts
+sudo infiax-monitor health         # Deep health check
+sudo infiax-monitor uninstall      # Remove everything
 ```
 
 ---
 
-## 🔧 Post-Install Configuration
+## After installing
 
-### 1. Pair Beszel Agent (Local Unix Socket)
+### Connect Beszel Agent
 
-During installation, `install.sh` automatically extracts the Beszel Hub ED25519 public key and configures `infiax-beszel-agent`. To complete pairing in the web UI:
+1. Open `https://monitor.example.com` and create your admin account.
+2. Click **+ Add System** → select the **Docker** tab.
+3. Set the host to: `/beszel_socket/beszel.sock`
+4. Click **Add system** — it should go green within a few seconds.
 
-1. Open `https://monitor.example.com` and create your administrator account.
-2. Click **+ Add System** and select the **Docker** tab.
-3. Set **Name** to your server name and **Host / IP** to:
-   ```text
-   /beszel_socket/beszel.sock
-   ```
-4. Click **Add system**. Within seconds, your server status will turn **Green (Up)** with live CPU, memory, disk, network, and container metrics.
+### Set up Telegram alerts
 
-### 2. Optional: Add Beszel Network Latency Monitors
+1. Run `sudo infiax-monitor telegram` (Option **12**) — it walks you through pasting your bot token and finding your Chat ID.
+2. Run `sudo infiax-monitor test-telegram` (Option **13**) — this registers the bot commands and sends a test message to your Telegram.
 
-In Beszel (`https://monitor.example.com` -> **Network Monitors** -> **+ Add Monitor**), you can track outbound network latency and packet loss from your VPS agent:
+Then enable notifications in:
+- **Uptime Kuma** → `Settings → Notifications → Telegram`
+- **Beszel Hub** → `Settings → Notifications` using `telegram://<BOT_TOKEN>@telegram?chats=<CHAT_ID>`
 
-| Type | Name | Target | Interval | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| `Ping` | `Cloudflare Edge` | `1.1.1.1` | `60s` | Measures baseline VPS datacenter network latency & packet loss |
-| `TCP` / `HTTP` | `Production Site` | `example.com:443` | `60s` | Measures reachability from your VPS to your production services |
+### Telegram bot commands
 
-### 3. Configure Telegram Instant Alerts & Interactive Bot Commands
+Once set up, you can type these commands in Telegram:
 
-1. Run `sudo infiax-monitor telegram` (Option **12**) to configure your `@BotFather` token and auto-detect your Chat ID (stored in `/opt/infiax-status-monitor/.env` with `0600` permissions).
-2. Run `sudo infiax-monitor test-telegram` (Option **13**) to register premade Telegram slash commands (`setMyCommands`), start the lightweight `infiax-telegram-bot` responder service, and send an interactive live dashboard card with inline buttons to your Telegram chat:
-   - `/status` — 📊 Full Server, Uptime, Network & Container Summary
-   - `/metrics` — ⚡ Live CPU, RAM, Swap & Disk Usage with visual bars (`▰▰▰▱▱▱▱▱▱▱`)
-   - `/containers` — 🐳 Docker Container Health & Memory Usage
-   - `/network` — 🌐 Outbound Ping Latency (`1.1.1.1`) & HTTPS Endpoint Status
-   - `/alerts` — 🔔 Audit All 6 Beszel Alert Thresholds
-   - `/help` — 🤖 Show Interactive Command Menu & Inline Buttons
-3. Enable push notifications in:
-   - **Uptime Kuma** (`Settings -> Notifications -> Telegram`)
-   - **Beszel Hub** (`Settings -> Notifications` using `telegram://<BOT_TOKEN>@telegram?chats=<CHAT_ID>`)
-
----
-
-## 💾 Backup, Restore & Safe Uninstallation
-
-- **Verified Hot Backups (`sudo infiax-monitor backup`)**
-  Performs online SQLite `.backup` snapshots of Uptime Kuma and Beszel databases without stopping monitoring, validates `PRAGMA integrity_check`, packs `.env`, `compose.yaml`, and `Caddyfile` into `/opt/infiax-status-monitor/backups/`, and writes a `.sha256` checksum manifest.
-- **Safe Uninstaller (`sudo ./uninstall.sh`)**
-  - **Mode 1 — Preserve Data**: Stops and removes containers and networks while keeping `/opt/infiax-status-monitor/data` and `backups` intact.
-  - **Mode 2 — Complete Removal**: Creates an optional final backup, verifies path safety, and cleanly removes the stack without touching Docker Engine or host firewall rules.
-
----
-
-## 📚 Documentation
-
-| Guide | Description |
+| Command | What it shows |
 | :--- | :--- |
-| [Installation Guide](docs/installation.md) | System requirements, DNS setup, dry-run checks, and installer flags |
-| [Configuration Reference](docs/configuration.md) | Directory layout, `.env` variables, memory tuning, and domain switching |
-| [Telegram Alerting Guide](docs/telegram.md) | `@BotFather` setup, Chat ID discovery, Uptime Kuma & Beszel Shoutrrr URLs |
-| [Security & Firewall Guide](docs/security.md) | Zero-trust networking, Unix socket isolation, and Oracle Cloud `iptables` rules |
-| [Backup & Restore Guide](docs/backup-restore.md) | Online SQLite backup architecture, retention policy, and disaster recovery |
-| [Uninstallation Guide](docs/uninstall.md) | Mode 1 (Preserve Data), Mode 2 (Full Purge), and `--dry-run` previews |
-| [Troubleshooting Guide](docs/troubleshooting.md) | Fixes for Let's Encrypt TLS, Beszel socket pairing, and `502 Bad Gateway` |
+| `/status` | Server uptime, CPU, RAM, disk, and website status |
+| `/metrics` | Live CPU, RAM, swap & disk with usage bars |
+| `/containers` | Docker container health and memory |
+| `/network` | Ping latency to Cloudflare DNS & your site status |
+| `/alerts` | All active Beszel alert thresholds |
+| `/report` | Full daily summary (also sent every night at 9 PM) |
+
+The bot also sends you automatic alerts when something goes down, and a full report every night at 9:00 PM (Sri Lanka time).
 
 ---
 
-## 📄 License
+## Backups
+
+Run `sudo infiax-monitor backup` to back up your data while everything keeps running.
+
+It saves a snapshot of the Uptime Kuma and Beszel databases, plus your config files (`.env`, `compose.yaml`, `Caddyfile`). Each backup also gets a checksum file so you can verify it wasn't corrupted.
+
+Backups are stored in `/opt/infiax-status-monitor/backups/`.
+
+---
+
+## Uninstalling
+
+Run `sudo ./uninstall.sh` — it will ask you which mode you want:
+
+- **Mode 1 – Keep data**: Removes containers but keeps your database and backup files.
+- **Mode 2 – Full removal**: Removes everything. It can take an optional final backup before deleting.
+
+Neither mode touches Docker itself or your firewall rules.
+
+---
+
+## Documentation
+
+| Guide | What's in it |
+| :--- | :--- |
+| [Installation Guide](docs/installation.md) | Requirements, DNS setup, dry-run, installer flags |
+| [Configuration Reference](docs/configuration.md) | Folder layout, `.env` settings, domain changes |
+| [Telegram Alerting Guide](docs/telegram.md) | BotFather setup, Chat ID, Uptime Kuma & Beszel URLs |
+| [Security & Firewall Guide](docs/security.md) | How networking works, Unix socket isolation |
+| [Backup & Restore Guide](docs/backup-restore.md) | How backups work, restore steps |
+| [Uninstallation Guide](docs/uninstall.md) | Mode 1, Mode 2, and dry-run preview |
+| [Troubleshooting Guide](docs/troubleshooting.md) | TLS errors, Beszel socket issues, 502 errors |
+
+---
+
+## License
 
 Released under the [MIT License](LICENSE).

@@ -146,12 +146,13 @@ enable_telegram_bot_service() {
     local unit_file="/etc/systemd/system/infiax-telegram-bot.service"
     cat > "${unit_file}" <<EOF
 [Unit]
-Description=Infiax Status Monitor Interactive Telegram Bot Responder
+Description=Infiax Status Monitor Interactive Telegram Bot & Alert Watcher
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
+Environment="TZ=Asia/Colombo"
 WorkingDirectory=${rdir}
 ExecStart=/usr/bin/env bash ${rdir}/scripts/telegram-bot.sh daemon
 Restart=always
@@ -161,10 +162,38 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+    local report_service="/etc/systemd/system/infiax-daily-report.service"
+    cat > "${report_service}" <<EOF
+[Unit]
+Description=Infiax Status Monitor 9:00 PM Daily Full Report (Sri Lanka Time)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+Environment="TZ=Asia/Colombo"
+WorkingDirectory=${rdir}
+ExecStart=/usr/bin/env bash ${rdir}/scripts/telegram-bot.sh report
+EOF
+
+    local report_timer="/etc/systemd/system/infiax-daily-report.timer"
+    cat > "${report_timer}" <<EOF
+[Unit]
+Description=Run Infiax Status Monitor Daily Full Report at 9:00 PM Sri Lanka Time
+
+[Timer]
+OnCalendar=*-*-* 21:00:00 Asia/Colombo
+Persistent=true
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+EOF
+
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable --now infiax-telegram-bot.service >/dev/null 2>&1 || true
     systemctl restart infiax-telegram-bot.service >/dev/null 2>&1 || true
-    msg_ok "Interactive Telegram Bot responder service (infiax-telegram-bot.service) is active."
+    systemctl enable --now infiax-daily-report.timer >/dev/null 2>&1 || true
+    msg_ok "Interactive Telegram Bot (TZ=Asia/Colombo) & 9:00 PM Daily Report timer are active."
 }
 
 send_telegram_test_notification() {

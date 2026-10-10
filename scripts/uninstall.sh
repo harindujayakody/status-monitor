@@ -177,9 +177,12 @@ run_uninstaller() {
     fi
     if [[ -f /etc/systemd/system/infiax-telegram-bot.service ]] && command -v systemctl >/dev/null 2>&1; then
         systemctl disable --now infiax-telegram-bot.service >/dev/null 2>&1 || true
-        rm -f /etc/systemd/system/infiax-telegram-bot.service
+        systemctl disable --now infiax-daily-report.timer >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/infiax-telegram-bot.service \
+              /etc/systemd/system/infiax-daily-report.service \
+              /etc/systemd/system/infiax-daily-report.timer
         systemctl daemon-reload >/dev/null 2>&1 || true
-        msg_ok "Removed infiax-telegram-bot.service systemd unit."
+        msg_ok "Removed Telegram Bot & Daily Report systemd units."
     fi
 
     # 3. Handle Mode 1 vs Mode 2 filesystem cleanup

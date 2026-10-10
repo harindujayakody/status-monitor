@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Infiax Status Monitor — Interactive Telegram Bot & Command Responder
+# Infiax Status Monitor — Interactive Telegram Bot, Alert Watcher & Daily Report
 # ==============================================================================
-# Registers premade Telegram slash commands (setMyCommands) for the native
-# Telegram Menu button and runs a lightweight, zero-port long-polling daemon
-# that replies to user-selected menu commands with clean, emoji-rich telemetry.
-#
-# Security:
-#   - Outbound HTTPS only (zero public ports opened).
-#   - Strictly restricted to the authorized TELEGRAM_CHAT_ID in .env.
+# Features:
+#   1. Sri Lanka Timezone (Asia/Colombo / SLST) across all messages & reports.
+#   2. Unified message format covering Uptime Kuma websites + all 6 Beszel
+#      notification categories (Status, CPU, Memory, Disk, Network Loss,
+#      Container Health).
+#   3. Real-time state-change watcher for Uptime Kuma & Beszel alerts so every
+#      notification uses the unified Infiax message format.
+#   4. Automated 9:00 PM (Asia/Colombo) Everyday Full Report via systemd timer.
 # ==============================================================================
 
 set -euo pipefail
@@ -16,6 +17,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "${SCRIPT_DIR}/common.sh"
+
+export TZ="Asia/Colombo"
+
+# --- Sri Lanka Timestamp Helper ---
+get_sl_timestamp() {
+    TZ="Asia/Colombo" date '+%Y-%m-%d • %I:%M:%S %p (SLST)'
+}
 
 # --- Host Uptime & Load Helpers ---
 get_system_uptime() {
@@ -107,8 +115,60 @@ get_network_ping_summary() {
     printf '%s|%s\n' "${loss}" "${rtt}"
 }
 
-# --- Format Message: /status (Full Overview) ---
-format_msg_status() {
+# --- Query Uptime Kuma Monitored Websites from SQLite ---
+get_uptime_kuma_monitors_summary() {
+    local rdir
+    rdir="$(get_runtime_dir)"
+    local kuma_db="${rdir}/data/uptime-kuma/kuma.db"
+    if [[ ! -r "${kuma_db}" ]] || ! command -v sqlite3 >/dev/null 2>&1; then
+        printf '🟢 <b>Uptime Kuma</b> — Active\n'
+        return 0
+    fi
+
+    local rows
+    rows="$(sqlite3 -separator '|' "${kuma_db}" "
+        SELECT
+            m.name,
+            COALESCE(h.status, 1),
+            COALESCE(h.ping, 0),
+            COALESCE((SELECT ROUND(AVG(status)*100, 1) FROM heartbeat WHERE monitor_id = m.id AND time >= datetime('now', '-24 hours')), 100.0)
+        FROM monitor m
+        LEFT JOIN heartbeat h ON h.id = (SELECT id FROM heartbeat WHERE monitor_id = m.id ORDER BY time DESC LIMIT 1)
+        WHERE m.active = 1;
+    " 2>/dev/null || true)"
+
+    if [[ -z "${rows}" ]]; then
+        printf '🟢 <b>Uptime Kuma</b> — Ready (No active monitors)\n'
+        return 0
+    fi
+
+    local line name st ping_ms up24 icon st_txt
+    while IFS='|' read -r name st ping_ms up24; do
+        [[ -z "${name}" ]] && continue
+        if [[ "${st}" == "1" ]]; then
+            icon="🟢"
+            st_txt="UP"
+        elif [[ "${st}" == "0" ]]; then
+            icon="🔴"
+            st_txt="DOWN"
+        else
+            icon="🟡"
+            st_txt="PENDING"
+        fi
+        printf '%s <b>%s:</b> <code>%s</code> • <code>%s ms</code> <i>(%s%% 24h)</i>\n' \
+            "${icon}" "${name}" "${st_txt}" "${ping_ms}" "${up24}"
+    done <<< "${rows}"
+}
+
+# --- Unified All-Notifications Card Generator ---
+# Used by:
+#   - /status (Live Status)
+#   - /report & 9:00 PM Daily Report
+#   - Real-time Alert Trigger / Recovery Notifications
+format_unified_notification_card() {
+    local header_title="${1:-🛡️ <b>INFIAX STATUS MONITOR</b>}"
+    local event_banner="${2:-}"
+
     local rdir
     rdir="$(get_runtime_dir)"
     local env_file="${rdir}/.env"
@@ -120,82 +180,7 @@ format_msg_status() {
     host_name="$(hostname 2>/dev/null || printf 'infiax-vps')"
     uptime_str="$(get_system_uptime)"
     load_str="$(get_load_average)"
-    ts_str="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-    local cpu_pct ram_used ram_total ram_pct swap_total
-    cpu_pct="$(get_cpu_pct)"
-    ram_used="$(get_used_ram_mib)"
-    ram_total="$(get_total_ram_mib)"
-    ram_pct=0
-    if (( ram_total > 0 )); then
-        ram_pct=$(( (ram_used * 100) / ram_total ))
-    fi
-    swap_total="$(get_total_swap_mib)"
-
-    local disk_info disk_pct disk_used disk_total
-    disk_info="$(get_disk_summary)"
-    disk_pct="${disk_info%%|*}"
-    local disk_rest="${disk_info#*|}"
-    disk_used="${disk_rest%%|*}"
-    disk_total="${disk_rest#*|}"
-
-    local net_info net_loss net_rtt
-    net_info="$(get_network_ping_summary)"
-    net_loss="${net_info%%|*}"
-    net_rtt="${net_info#*|}"
-
-    local cpu_icon ram_icon disk_icon net_icon
-    cpu_icon="$(metric_badge "${cpu_pct}" 65 80)"
-    ram_icon="$(metric_badge "${ram_pct}" 65 80)"
-    disk_icon="$(metric_badge "${disk_pct}" 65 80)"
-    net_icon="$(metric_badge "${net_loss}" 5 10)"
-
-    local healthy_cnt=0
-    local total_cnt=4
-    local cname
-    for cname in infiax-caddy infiax-uptime-kuma infiax-beszel-hub infiax-beszel-agent; do
-        local st hlth
-        st="$(docker inspect -f '{{.State.Status}}' "${cname}" 2>/dev/null || printf 'missing')"
-        hlth="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${cname}" 2>/dev/null || printf 'missing')"
-        if [[ "${st}" == "running" && "${hlth}" == "healthy" ]]; then
-            healthy_cnt=$(( healthy_cnt + 1 ))
-        fi
-    done
-
-    local stack_badge="🟢 <b>ALL SYSTEMS OPERATIONAL</b>"
-    if (( healthy_cnt < total_cnt || cpu_pct >= 80 || ram_pct >= 80 || disk_pct >= 80 || net_loss >= 10 )); then
-        stack_badge="🟡 <b>ATTENTION REQUIRED</b>"
-    fi
-
-    cat <<EOF
-🛡️ <b>INFIAX STATUS MONITOR</b>
-${stack_badge}
-────────────────
-
-🖥️ <b>Host:</b> <code>${host_name}</code>
-⏱️ <b>Uptime:</b> <code>${uptime_str}</code>
-📈 <b>Load:</b> <code>${load_str}</code>
-
-<b>⚡ Resource Telemetry</b>
-${cpu_icon} <b>CPU:</b>  <code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
-${ram_icon} <b>RAM:</b>  <code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b> <i>(${ram_used}/${ram_total} MiB)</i>
-${disk_icon} <b>Disk:</b> <code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b> <i>(${disk_used}/${disk_total} GB)</i>
-💾 <b>Swap:</b> <code>${swap_total} MiB Configured</code>
-
-<b>🌐 Network &amp; Containers</b>
-${net_icon} <b>Ping (1.1.1.1):</b> <code>${net_rtt} ms</code> • <code>${net_loss}% loss</code>
-🐳 <b>Containers:</b> <code>${healthy_cnt}/${total_cnt} Healthy</code>
-
-🔗 <a href="https://${status_domain}">Uptime Kuma</a>  •  <a href="https://${beszel_domain}">Beszel Hub</a>
-🕒 <i>${ts_str}</i>
-EOF
-}
-
-# --- Format Message: /metrics (Detailed CPU, RAM, Swap, Disk) ---
-format_msg_metrics() {
-    local host_name ts_str
-    host_name="$(hostname 2>/dev/null || printf 'infiax-vps')"
-    ts_str="$(date -u '+%H:%M:%S UTC')"
+    ts_str="$(get_sl_timestamp)"
 
     local cpu_pct ram_used ram_total ram_pct
     cpu_pct="$(get_cpu_pct)"
@@ -224,190 +209,142 @@ format_msg_metrics() {
     disk_used="${disk_rest%%|*}"
     disk_total="${disk_rest#*|}"
 
-    cat <<EOF
-⚡ <b>SERVER RESOURCE TELEMETRY</b>
-🖥️ <b>Host:</b> <code>${host_name}</code>
-────────────────
-
-$(metric_badge "${cpu_pct}" 65 80) <b>CPU Usage</b> <i>(Alert &gt; 80% for 10m)</i>
-<code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
-• Load Average: <code>$(get_load_average)</code>
-
-$(metric_badge "${ram_pct}" 65 80) <b>Memory Usage</b> <i>(Alert &gt; 80% for 10m)</i>
-<code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b>
-• Used: <code>${ram_used} MiB</code> / <code>${ram_total} MiB</code>
-
-🟢 <b>Swap Space</b>
-<code>$(make_bar "${swap_pct}")</code> <b>${swap_pct}%</b>
-• Used: <code>${swap_used} MiB</code> / <code>${swap_total} MiB</code>
-
-$(metric_badge "${disk_pct}" 65 80) <b>Disk Usage</b> <i>(Alert &gt; 80% for 10m)</i>
-<code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b>
-• Used: <code>${disk_used} GB</code> / <code>${disk_total} GB</code>
-
-🕒 <i>Checked at ${ts_str}</i>
-EOF
-}
-
-# --- Format Message: /containers (Docker Container Health & Memory) ---
-format_msg_containers() {
-    local ts_str
-    ts_str="$(date -u '+%H:%M:%S UTC')"
-
-    local stats_raw
-    stats_raw="$(docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null || true)"
-
-    local lines=""
-    local cname
-    for cname in infiax-caddy infiax-uptime-kuma infiax-beszel-hub infiax-beszel-agent; do
-        local st hlth icon cpu_val mem_val
-        st="$(docker inspect -f '{{.State.Status}}' "${cname}" 2>/dev/null || printf 'stopped')"
-        hlth="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${cname}" 2>/dev/null || printf 'unknown')"
-        if [[ "${st}" == "running" && "${hlth}" == "healthy" ]]; then
-            icon="🟢"
-        elif [[ "${st}" == "running" ]]; then
-            icon="🟡"
-        else
-            icon="🔴"
-        fi
-        cpu_val="$(printf '%s\n' "${stats_raw}" | awk -F'|' -v c="${cname}" '$1==c {print $2}')"
-        mem_val="$(printf '%s\n' "${stats_raw}" | awk -F'|' -v c="${cname}" '$1==c {print $3}')"
-        [[ -z "${cpu_val}" ]] && cpu_val="0.00%"
-        [[ -z "${mem_val}" ]] && mem_val="N/A"
-
-        lines="${lines}${icon} <b>${cname}</b>
-   ├ State: <code>${st} (${hlth})</code>
-   └ Usage: <code>CPU ${cpu_val}</code> • <code>${mem_val}</code>
-
-"
-    done
-
-    cat <<EOF
-🐳 <b>DOCKER CONTAINER HEALTH</b>
-<i>Alert threshold: Unhealthy &gt; 10m</i>
-────────────────
-
-${lines}🕒 <i>Checked at ${ts_str}</i>
-EOF
-}
-
-# --- Format Message: /network (Ping Latency, Loss & HTTPS Endpoints) ---
-format_msg_network() {
-    local rdir
-    rdir="$(get_runtime_dir)"
-    local env_file="${rdir}/.env"
-    local status_domain beszel_domain
-    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
-    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
-
     local net_info net_loss net_rtt
     net_info="$(get_network_ping_summary)"
     net_loss="${net_info%%|*}"
     net_rtt="${net_info#*|}"
-    local net_icon
+
+    local cpu_icon ram_icon disk_icon net_icon
+    cpu_icon="$(metric_badge "${cpu_pct}" 65 80)"
+    ram_icon="$(metric_badge "${ram_pct}" 65 80)"
+    disk_icon="$(metric_badge "${disk_pct}" 65 80)"
     net_icon="$(metric_badge "${net_loss}" 5 10)"
 
-    local kuma_code beszel_code kuma_icon beszel_icon
-    kuma_code="$(curl -ksSL -o /dev/null -w '%{http_code}' --max-time 5 "https://${status_domain}" 2>/dev/null || printf '000')"
-    beszel_code="$(curl -ksSL -o /dev/null -w '%{http_code}' --max-time 5 "https://${beszel_domain}" 2>/dev/null || printf '000')"
+    # Collect Container Health & Memory
+    local stats_raw
+    stats_raw="$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' 2>/dev/null || true)"
 
-    if [[ "${kuma_code}" =~ ^(200|301|302)$ ]]; then kuma_icon="🟢"; else kuma_icon="🔴"; fi
-    if [[ "${beszel_code}" =~ ^(200|301|302)$ ]]; then beszel_icon="🟢"; else beszel_icon="🔴"; fi
-
-    cat <<EOF
-🌐 <b>NETWORK &amp; ENDPOINT TELEMETRY</b>
-<i>Alert threshold: Packet Loss &gt; 10%</i>
-────────────────
-
-<b>📡 Outbound Latency Monitor (1.1.1.1)</b>
-${net_icon} <b>Packet Loss:</b> <code>${net_loss}%</code> <i>(Threshold: &lt; 10%)</i>
-⚡ <b>Avg Latency:</b> <code>${net_rtt} ms</code>
-
-<b>🔒 HTTPS Public Endpoints</b>
-${kuma_icon} <b>Uptime Kuma:</b> <code>HTTP ${kuma_code}</code>
-   └ <a href="https://${status_domain}">https://${status_domain}</a>
-${beszel_icon} <b>Beszel Hub:</b> <code>HTTP ${beszel_code}</code>
-   └ <a href="https://${beszel_domain}">https://${beszel_domain}</a>
-
-🔌 <b>Beszel Unix Socket:</b>
-   └ <code>/beszel_socket/beszel.sock</code> (🟢 Isolated)
-EOF
-}
-
-# --- Format Message: /alerts (Check All 6 Configured Alert Rules) ---
-format_msg_alerts() {
-    local cpu_pct ram_used ram_total ram_pct
-    cpu_pct="$(get_cpu_pct)"
-    ram_used="$(get_used_ram_mib)"
-    ram_total="$(get_total_ram_mib)"
-    ram_pct=0
-    if (( ram_total > 0 )); then
-        ram_pct=$(( (ram_used * 100) / ram_total ))
-    fi
-
-    local disk_info disk_pct
-    disk_info="$(get_disk_summary)"
-    disk_pct="${disk_info%%|*}"
-
-    local net_info net_loss
-    net_info="$(get_network_ping_summary)"
-    net_loss="${net_info%%|*}"
-
-    local unhealthy_cnt=0
+    local healthy_cnt=0
+    local total_cnt=4
+    local container_lines=""
     local cname
     for cname in infiax-caddy infiax-uptime-kuma infiax-beszel-hub infiax-beszel-agent; do
-        local st hlth
+        local st hlth c_icon mem_short
         st="$(docker inspect -f '{{.State.Status}}' "${cname}" 2>/dev/null || printf 'stopped')"
-        hlth="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${cname}" 2>/dev/null || printf 'unknown')"
-        if [[ "${st}" != "running" || "${hlth}" != "healthy" ]]; then
-            unhealthy_cnt=$(( unhealthy_cnt + 1 ))
+        hlth="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${cname}" 2>/dev/null || printf 'missing')"
+        if [[ "${st}" == "running" && "${hlth}" == "healthy" ]]; then
+            healthy_cnt=$(( healthy_cnt + 1 ))
+            c_icon="🟢"
+        elif [[ "${st}" == "running" ]]; then
+            c_icon="🟡"
+        else
+            c_icon="🔴"
         fi
+        mem_short="$(printf '%s\n' "${stats_raw}" | awk -F'|' -v c="${cname}" '$1==c {split($2,a,"/"); gsub(/[[:space:]]+/,"",a[1]); print a[1]}')"
+        [[ -z "${mem_short}" ]] && mem_short="N/A"
+        local short_name="${cname#infiax-}"
+        container_lines="${container_lines}• ${c_icon} <code>${short_name}</code>: ${hlth} <i>(${mem_short})</i>
+"
     done
 
-    local c_icon="🟢"
-    if (( unhealthy_cnt > 0 )); then c_icon="🔴"; fi
+    local cont_badge="🟢"
+    if (( healthy_cnt < total_cnt )); then
+        cont_badge="🔴"
+    fi
+
+    local overall_badge="🟢 <b>ALL SYSTEMS OPERATIONAL</b>"
+    if (( healthy_cnt < total_cnt || cpu_pct >= 80 || ram_pct >= 80 || disk_pct >= 80 || net_loss >= 10 )); then
+        overall_badge="🔴 <b>ALERT THRESHOLD EXCEEDED</b>"
+    fi
+    if [[ -n "${event_banner}" ]]; then
+        overall_badge="${event_banner}"
+    fi
+
+    local kuma_summary
+    kuma_summary="$(get_uptime_kuma_monitors_summary)"
 
     cat <<EOF
-🔔 <b>ACTIVE ALERT RULES CHECK</b>
+${header_title}
+${overall_badge}
 ────────────────
 
-🟢 <b>1. System Status</b>
-   • Rule: <i>Down for 10 minutes</i>
-   • Current: <code>ONLINE ($(get_system_uptime))</code>
+🌐 <b>Website Monitors</b>
+${kuma_summary}
+🖥️ <b>1. System Status</b> <i>(Alert &gt; 10m down)</i>
+🟢 <b>ONLINE</b> • <code>${host_name}</code>
+• Uptime: <code>${uptime_str}</code>
+• Load: <code>${load_str}</code>
 
-$(metric_badge "${cpu_pct}" 65 80) <b>2. CPU Usage</b>
-   • Rule: <i>Exceeds 80% for 10 minutes</i>
-   • Current: <code>${cpu_pct}%</code>
+${cpu_icon} <b>2. CPU Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${cpu_pct}")</code> <b>${cpu_pct}%</b>
 
-$(metric_badge "${ram_pct}" 65 80) <b>3. Memory Usage</b>
-   • Rule: <i>Exceeds 80% for 10 minutes</i>
-   • Current: <code>${ram_pct}% (${ram_used}/${ram_total} MiB)</code>
+${ram_icon} <b>3. Memory Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</b>
+• RAM: <code>${ram_used} MiB / ${ram_total} MiB</code>
+• Swap: <code>${swap_used} MiB / ${swap_total} MiB (${swap_pct}%)</code>
 
-$(metric_badge "${disk_pct}" 65 80) <b>4. Disk Usage</b>
-   • Rule: <i>Exceeds 80% for 10 minutes</i>
-   • Current: <code>${disk_pct}%</code>
+${disk_icon} <b>4. Disk Usage</b> <i>(Alert &gt; 80% for 10m)</i>
+<code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b>
+• Used: <code>${disk_used} GB / ${disk_total} GB</code>
 
-$(metric_badge "${net_loss}" 5 10) <b>5. Network Monitor Loss</b>
-   • Rule: <i>Exceeds 10% packet loss</i>
-   • Current: <code>${net_loss}% loss (1.1.1.1)</code>
+${net_icon} <b>5. Network Monitor Loss</b> <i>(Alert &gt; 10%)</i>
+• Cloudflare (1.1.1.1): <code>${net_loss}% loss</code> • <code>${net_rtt} ms</code>
 
-${c_icon} <b>6. Container Health</b>
-   • Rule: <i>Container unhealthy for 10 minutes</i>
-   • Current: <code>$(( 4 - unhealthy_cnt ))/4 Containers Healthy</code>
+${cont_badge} <b>6. Container Health</b> <i>(${healthy_cnt}/${total_cnt} Healthy)</i>
+${container_lines}
+🔗 <a href="https://${status_domain}">Status Page</a>  •  <a href="https://${beszel_domain}">Beszel Hub</a>
+🕒 <i>${ts_str}</i>
 EOF
 }
 
-# --- Format Message: /help or /start ---
+# --- Format Commands ---
+format_msg_status() {
+    format_unified_notification_card "🛡️ <b>INFIAX STATUS MONITOR</b>"
+}
+
+format_msg_daily_report() {
+    local rdir
+    rdir="$(get_runtime_dir)"
+    local beszel_db="${rdir}/data/beszel/data.db"
+    local incidents_24h=0
+    if [[ -r "${beszel_db}" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        incidents_24h="$(sqlite3 "${beszel_db}" "SELECT COUNT(*) FROM alerts_history WHERE created >= datetime('now', '-24 hours');" 2>/dev/null || printf '0')"
+    fi
+
+    local banner="🟢 <b>24H SUMMARY: ${incidents_24h} ALERTS TRIGGERED</b>"
+    if (( incidents_24h > 0 )); then
+        banner="🟡 <b>24H SUMMARY: ${incidents_24h} ALERT(S) LOGGED</b>"
+    fi
+    format_unified_notification_card "📅 <b>DAILY 9:00 PM FULL REPORT</b>" "${banner}"
+}
+
+format_msg_metrics() {
+    format_unified_notification_card "⚡ <b>RESOURCE TELEMETRY REPORT</b>"
+}
+
+format_msg_containers() {
+    format_unified_notification_card "🐳 <b>CONTAINER HEALTH REPORT</b>"
+}
+
+format_msg_network() {
+    format_unified_notification_card "🌐 <b>NETWORK &amp; UPTIME REPORT</b>"
+}
+
+format_msg_alerts() {
+    format_unified_notification_card "🔔 <b>ALL NOTIFICATION RULES CHECK</b>"
+}
+
 format_msg_help() {
     cat <<'EOF'
 🤖 <b>INFIAX MONITOR BOT</b>
 ────────────────
 
-📊 /status — Server Status
+📊 /status — Live Full Status (All Notifications)
+📅 /report — Daily 9:00 PM Full Report
 ⚡ /metrics — CPU, RAM &amp; Disk
-🐳 /containers — Containers
-🌐 /network — Network Ping
-🔔 /alerts — Alert Rules
+🐳 /containers — Container Health
+🌐 /network — Website &amp; Ping Status
+🔔 /alerts — Alert Rules Check
 EOF
 }
 
@@ -427,6 +364,7 @@ register_bot_commands() {
     local commands_json
     commands_json='{"commands":[
       {"command":"status","description":"📊 Server Status"},
+      {"command":"report","description":"📅 Full Report"},
       {"command":"metrics","description":"⚡ CPU, RAM & Disk"},
       {"command":"containers","description":"🐳 Containers"},
       {"command":"network","description":"🌐 Network Ping"},
@@ -440,7 +378,7 @@ register_bot_commands() {
         "https://api.telegram.org/bot${token}/setMyCommands" 2>/dev/null || true)"
 
     if [[ "${resp}" == *'"ok":true'* ]]; then
-        msg_ok "Registered simplified Telegram Menu commands (/status, /metrics, /containers, /network, /alerts)."
+        msg_ok "Registered simplified Telegram Menu commands (/status, /report, /metrics, /containers, /network, /alerts)."
         return 0
     else
         msg_error "Failed to register Telegram slash commands via setMyCommands."
@@ -448,7 +386,7 @@ register_bot_commands() {
     fi
 }
 
-# --- Send Clean Telegram Message (No persistent inline button clutter) ---
+# --- Send Clean Telegram Message ---
 send_bot_reply() {
     local token="$1"
     local chat_id="$2"
@@ -481,6 +419,9 @@ dispatch_bot_command() {
         /status|cmd_status)
             format_msg_status
             ;;
+        /report|/daily|cmd_report)
+            format_msg_daily_report
+            ;;
         /metrics|/resources|cmd_metrics)
             format_msg_metrics
             ;;
@@ -499,6 +440,83 @@ dispatch_bot_command() {
     esac
 }
 
+# --- Check for Real-Time Alert State Changes (Beszel + Uptime Kuma) ---
+# Sends a unified formatted notification card whenever any Uptime Kuma website
+# or Beszel alert changes state (Triggered <-> Resolved).
+check_and_notify_alert_transitions() {
+    local token="$1"
+    local chat_id="$2"
+    local rdir
+    rdir="$(get_runtime_dir)"
+    local state_dir="${rdir}/data/beszel-agent"
+    mkdir -p "${state_dir}" 2>/dev/null || true
+    local prev_file="${state_dir}/.alert_state_snapshot"
+
+    local current_state=""
+    local beszel_db="${rdir}/data/beszel/data.db"
+    local kuma_db="${rdir}/data/uptime-kuma/kuma.db"
+
+    if [[ -r "${beszel_db}" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        local b_rows
+        b_rows="$(sqlite3 -separator ':' "${beszel_db}" "SELECT 'BESZEL_' || name, triggered FROM alerts ORDER BY name;" 2>/dev/null || true)"
+        current_state="${current_state}${b_rows}"$'\n'
+    fi
+
+    if [[ -r "${kuma_db}" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        local k_rows
+        k_rows="$(sqlite3 -separator ':' "${kuma_db}" "
+            SELECT 'KUMA_' || m.name, COALESCE(h.status, 1)
+            FROM monitor m
+            LEFT JOIN heartbeat h ON h.id = (SELECT id FROM heartbeat WHERE monitor_id = m.id ORDER BY time DESC LIMIT 1)
+            WHERE m.active = 1
+            ORDER BY m.id;
+        " 2>/dev/null || true)"
+        current_state="${current_state}${k_rows}"$'\n'
+    fi
+
+    if [[ ! -f "${prev_file}" ]]; then
+        printf '%s' "${current_state}" > "${prev_file}"
+        return 0
+    fi
+
+    local prev_state
+    prev_state="$(cat "${prev_file}" 2>/dev/null || true)"
+    if [[ "${current_state}" == "${prev_state}" ]]; then
+        return 0
+    fi
+
+    # Detect which specific item changed
+    local key val old_val
+    while IFS=':' read -r key val; do
+        [[ -z "${key}" ]] && continue
+        old_val="$(printf '%s\n' "${prev_state}" | awk -F':' -v k="${key}" '$1==k {print $2}' | head -n 1)"
+        [[ -z "${old_val}" ]] && continue
+        if [[ "${val}" != "${old_val}" ]]; then
+            local html_alert=""
+            if [[ "${key}" == BESZEL_* ]]; then
+                local aname="${key#BESZEL_}"
+                if [[ "${val}" == "1" ]]; then
+                    html_alert="$(format_unified_notification_card "🚨 <b>INFIAX ALERT TRIGGERED</b>" "🔴 <b>${aname} THRESHOLD EXCEEDED</b>")"
+                else
+                    html_alert="$(format_unified_notification_card "✅ <b>INFIAX ALERT RESOLVED</b>" "🟢 <b>${aname} RECOVERED TO NORMAL</b>")"
+                fi
+            elif [[ "${key}" == KUMA_* ]]; then
+                local mname="${key#KUMA_}"
+                if [[ "${val}" == "0" ]]; then
+                    html_alert="$(format_unified_notification_card "🚨 <b>WEBSITE DOWN ALERT</b>" "🔴 <b>${mname} IS UNREACHABLE</b>")"
+                elif [[ "${val}" == "1" && "${old_val}" == "0" ]]; then
+                    html_alert="$(format_unified_notification_card "✅ <b>WEBSITE RECOVERED</b>" "🟢 <b>${mname} IS BACK ONLINE</b>")"
+                fi
+            fi
+            if [[ -n "${html_alert}" ]]; then
+                send_bot_reply "${token}" "${chat_id}" "${html_alert}"
+            fi
+        fi
+    done <<< "${current_state}"
+
+    printf '%s' "${current_state}" > "${prev_file}"
+}
+
 # --- Long-Polling Bot Daemon ---
 run_bot_daemon() {
     local rdir
@@ -515,7 +533,7 @@ run_bot_daemon() {
     fi
 
     register_bot_commands || true
-    msg_info "Starting Infiax Telegram Bot long-polling responder for Chat ID ${allowed_chat}..."
+    msg_info "Starting Infiax Telegram Bot long-polling responder (TZ=Asia/Colombo) for Chat ID ${allowed_chat}..."
 
     local offset=0
     local init_resp
@@ -532,8 +550,11 @@ run_bot_daemon() {
         token="$(get_env_val "TELEGRAM_BOT_TOKEN" "${token}" "${env_file}")"
         allowed_chat="$(get_env_val "TELEGRAM_CHAT_ID" "${allowed_chat}" "${env_file}")"
 
+        # Check for real-time alert transitions
+        check_and_notify_alert_transitions "${token}" "${allowed_chat}" || true
+
         local updates
-        updates="$(curl -fsSL --max-time 35 -K - <<<"url = \"https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=%5B%22message%22,%22callback_query%22%5D\"" 2>/dev/null || true)"
+        updates="$(curl -fsSL --max-time 25 -K - <<<"url = \"https://api.telegram.org/bot${token}/getUpdates?timeout=15&offset=${offset}&allowed_updates=%5B%22message%22,%22callback_query%22%5D\"" 2>/dev/null || true)"
 
         if [[ -z "${updates}" || "${updates}" != *'"ok":true'* ]]; then
             sleep 5
@@ -588,8 +609,9 @@ run_bot_daemon() {
     done
 }
 
-# --- Send Clean Status Card Immediately ---
+# --- Send Clean Status Card or Daily Report Immediately ---
 send_interactive_status_card() {
+    local mode="${1:-status}"
     local rdir
     rdir="$(get_runtime_dir)"
     local env_file="${rdir}/.env"
@@ -604,9 +626,13 @@ send_interactive_status_card() {
 
     register_bot_commands || true
     local html
-    html="$(format_msg_status)"
+    if [[ "${mode}" == "report" ]]; then
+        html="$(format_msg_daily_report)"
+    else
+        html="$(format_msg_status)"
+    fi
     send_bot_reply "${token}" "${chat_id}" "${html}"
-    msg_ok "Sent live status card to Telegram!"
+    msg_ok "Sent live ${mode} card to Telegram (Sri Lanka Time)!"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
@@ -616,7 +642,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             register_bot_commands
             ;;
         send|--send|card)
-            send_interactive_status_card
+            send_interactive_status_card "status"
+            ;;
+        report|--report|daily-report)
+            send_interactive_status_card "report"
             ;;
         daemon|--daemon|*)
             run_bot_daemon

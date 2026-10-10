@@ -16,13 +16,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "${SCRIPT_DIR}/common.sh"
-# shellcheck source=scripts/preflight.sh
-source "${SCRIPT_DIR}/preflight.sh"
+
+# --- Host Uptime & Load Helpers ---
+get_system_uptime() {
+    if [[ -r /proc/uptime ]]; then
+        uptime -p 2>/dev/null | sed 's/^up //' || awk '{printf "%d hours", int($1/3600)}' /proc/uptime
+    else
+        uptime 2>/dev/null | sed 's/^.*up *//; s/, *[0-9]* user.*$//' || printf 'online'
+    fi
+}
+
+get_load_average() {
+    if [[ -r /proc/loadavg ]]; then
+        awk '{print $1 " / " $2 " / " $3}' /proc/loadavg
+    else
+        uptime 2>/dev/null | awk -F'load averages?: ' '{print $2}' || printf '0.00'
+    fi
+}
 
 # --- Visual Bar Helper (10 blocks) ---
 make_bar() {
     local pct="${1:-0}"
-    # Clamp 0..100
     if (( pct < 0 )); then pct=0; fi
     if (( pct > 100 )); then pct=100; fi
     local filled=$(( (pct + 5) / 10 ))
@@ -138,13 +152,13 @@ format_msg_status() {
 
     local cpu_pct ram_used ram_total ram_pct swap_total
     cpu_pct="$(get_cpu_pct)"
-    ram_used="$(get_used_ram_mb)"
-    ram_total="$(get_total_ram_mb)"
+    ram_used="$(get_used_ram_mib)"
+    ram_total="$(get_total_ram_mib)"
     ram_pct=0
     if (( ram_total > 0 )); then
         ram_pct=$(( (ram_used * 100) / ram_total ))
     fi
-    swap_total="$(get_total_swap_mb)"
+    swap_total="$(get_total_swap_mib)"
 
     local disk_info disk_pct disk_used disk_total
     disk_info="$(get_disk_summary)"
@@ -164,7 +178,6 @@ format_msg_status() {
     disk_icon="$(metric_badge "${disk_pct}" 65 80)"
     net_icon="$(metric_badge "${net_loss}" 5 10)"
 
-    # Count healthy containers
     local healthy_cnt=0
     local total_cnt=4
     local cname
@@ -197,7 +210,7 @@ ${ram_icon} <b>RAM:</b>   <code>$(make_bar "${ram_pct}")</code> <b>${ram_pct}%</
 ${disk_icon} <b>Disk:</b>  <code>$(make_bar "${disk_pct}")</code> <b>${disk_pct}%</b> <i>(${disk_used}/${disk_total} GB)</i>
 💾 <b>Swap:</b>  <code>${swap_total} MiB Configured</code>
 
-<b>🌐 Network & Containers</b>
+<b>🌐 Network &amp; Containers</b>
 ${net_icon} <b>Ping (1.1.1.1):</b> <code>${net_rtt} ms</code> • <code>${net_loss}% loss</code>
 🐳 <b>Containers:</b> <code>${healthy_cnt}/${total_cnt} Healthy</code>
 
@@ -214,8 +227,8 @@ format_msg_metrics() {
 
     local cpu_pct ram_used ram_total ram_pct
     cpu_pct="$(get_cpu_pct)"
-    ram_used="$(get_used_ram_mb)"
-    ram_total="$(get_total_ram_mb)"
+    ram_used="$(get_used_ram_mib)"
+    ram_total="$(get_total_ram_mib)"
     ram_pct=0
     if (( ram_total > 0 )); then
         ram_pct=$(( (ram_used * 100) / ram_total ))
@@ -353,8 +366,8 @@ EOF
 format_msg_alerts() {
     local cpu_pct ram_used ram_total ram_pct
     cpu_pct="$(get_cpu_pct)"
-    ram_used="$(get_used_ram_mb)"
-    ram_total="$(get_total_ram_mb)"
+    ram_used="$(get_used_ram_mib)"
+    ram_total="$(get_total_ram_mib)"
     ram_pct=0
     if (( ram_total > 0 )); then
         ram_pct=$(( (ram_used * 100) / ram_total ))
@@ -509,7 +522,6 @@ send_bot_reply() {
 # --- Route Command to Formatter ---
 dispatch_bot_command() {
     local cmd="$1"
-    # Strip @bot_username suffix if present
     cmd="${cmd%%@*}"
     case "${cmd}" in
         /status|cmd_status)
@@ -552,9 +564,8 @@ run_bot_daemon() {
     msg_info "Starting Infiax Telegram Bot long-polling responder for Chat ID ${allowed_chat}..."
 
     local offset=0
-    # Flush old updates on startup so we only respond to fresh commands
     local init_resp
-    init_resp="$(curl -fsSL --max-time 10 "https://api.telegram.org/bot${token}/getUpdates?timeout=0&offset=-1" 2>/dev/null || true)"
+    init_resp="$(curl -fsSL --max-time 10 -K - <<<"url = \"https://api.telegram.org/bot${token}/getUpdates?timeout=0&offset=-1\"" 2>/dev/null || true)"
     if [[ -n "${init_resp}" ]]; then
         local last_id
         last_id="$(printf '%s' "${init_resp}" | jq -r '.result[-1].update_id // empty' 2>/dev/null || true)"
@@ -564,12 +575,11 @@ run_bot_daemon() {
     fi
 
     while true; do
-        # Reload credentials dynamically in case .env was updated
         token="$(get_env_val "TELEGRAM_BOT_TOKEN" "${token}" "${env_file}")"
         allowed_chat="$(get_env_val "TELEGRAM_CHAT_ID" "${allowed_chat}" "${env_file}")"
 
         local updates
-        updates="$(curl -fsSL --max-time 35 "https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=%5B%22message%22,%22callback_query%22%5D" 2>/dev/null || true)"
+        updates="$(curl -fsSL --max-time 35 -K - <<<"url = \"https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=%5B%22message%22,%22callback_query%22%5D\"" 2>/dev/null || true)"
 
         if [[ -z "${updates}" || "${updates}" != *'"ok":true'* ]]; then
             sleep 5
@@ -598,7 +608,6 @@ run_bot_daemon() {
             cb_msg_id="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.message.message_id // empty" 2>/dev/null || true)"
             cb_data="$(printf '%s' "${updates}" | jq -r ".result[${i}].callback_query.data // empty" 2>/dev/null || true)"
 
-            # Handle Slash Command Message
             if [[ -n "${msg_chat_id}" && -n "${msg_text}" ]]; then
                 if [[ "${msg_chat_id}" != "${allowed_chat}" ]]; then
                     log_event "WARN" "Ignored unauthorized Telegram command from chat_id=${msg_chat_id}"
@@ -609,7 +618,6 @@ run_bot_daemon() {
                 send_bot_reply "${token}" "${allowed_chat}" "${reply_html}"
             fi
 
-            # Handle Inline Button Tap (Callback Query)
             if [[ -n "${cb_id}" && -n "${cb_chat_id}" && -n "${cb_data}" ]]; then
                 if [[ "${cb_chat_id}" != "${allowed_chat}" ]]; then
                     continue

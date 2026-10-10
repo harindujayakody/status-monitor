@@ -41,7 +41,9 @@ printf '=== Running Terminal Menu, Backup & Restore Tests ===\n'
 
 prepare_runtime_directories "${TMP_INSTALL_DIR}" >/dev/null
 
-# 1. Test CLI flags & non-interactive subcommands
+# 1. Test CLI flags, symlink invocation & non-interactive subcommands
+ln -sf "${REPO_ROOT}/monitor.sh" "${TMP_INSTALL_DIR}/infiax-monitor-symlink"
+assert_ok "monitor.sh via symlink (--version)" "${TMP_INSTALL_DIR}/infiax-monitor-symlink" --version
 assert_ok "monitor.sh --help" bash "${REPO_ROOT}/monitor.sh" --help
 assert_ok "monitor.sh --version" bash "${REPO_ROOT}/monitor.sh" --version
 assert_ok "monitor.sh info" bash "${REPO_ROOT}/monitor.sh" info

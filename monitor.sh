@@ -16,7 +16,17 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_script_dir() {
+    local src="${BASH_SOURCE[0]}"
+    while [[ -L "${src}" ]]; do
+        local dir
+        dir="$(cd -P "$(dirname "${src}")" && pwd)"
+        src="$(readlink "${src}")"
+        [[ "${src}" != /* ]] && src="${dir}/${src}"
+    done
+    cd -P "$(dirname "${src}")" && pwd
+}
+ROOT_DIR="$(resolve_script_dir)"
 # shellcheck source=scripts/common.sh
 source "${ROOT_DIR}/scripts/common.sh"
 # shellcheck source=scripts/preflight.sh

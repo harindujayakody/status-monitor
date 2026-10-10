@@ -127,11 +127,44 @@ telegram_setup_guide() {
     printf '     • Add the following Shoutrrr URL format:\n'
     printf '       %stelegram://<YOUR_BOT_TOKEN>@telegram?chats=%s%s\n' "${C_CYAN}" "${new_chat}" "${C_RESET}"
     printf '     • Click the bell icon on your VPS row in the dashboard to enable alerts for:\n'
-    printf '       CPU, Memory, Disk usage, Bandwidth, Status (Up/Down), and Temperature.\n\n'
+    printf '       CPU, Memory, Disk usage, Bandwidth, Status (Up/Down), and Container Health.\n\n'
 
-    if confirm_action "Send a live test notification to Telegram now?" "y"; then
+    enable_telegram_bot_service || true
+
+    if confirm_action "Send a live interactive status card & register bot commands now?" "y"; then
         send_telegram_test_notification
     fi
+}
+
+enable_telegram_bot_service() {
+    local rdir
+    rdir="$(get_runtime_dir)"
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]] || ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local unit_file="/etc/systemd/system/infiax-telegram-bot.service"
+    cat > "${unit_file}" <<EOF
+[Unit]
+Description=Infiax Status Monitor Interactive Telegram Bot Responder
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${rdir}
+ExecStart=/usr/bin/env bash ${rdir}/scripts/telegram-bot.sh daemon
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now infiax-telegram-bot.service >/dev/null 2>&1 || true
+    systemctl restart infiax-telegram-bot.service >/dev/null 2>&1 || true
+    msg_ok "Interactive Telegram Bot responder service (infiax-telegram-bot.service) is active."
 }
 
 send_telegram_test_notification() {
@@ -139,13 +172,11 @@ send_telegram_test_notification() {
     rdir="$(get_runtime_dir)"
     local env_file="${rdir}/.env"
 
-    print_section "TEST TELEGRAM NOTIFICATIONS"
+    print_section "TEST TELEGRAM NOTIFICATIONS & BOT COMMANDS"
 
-    local token chat_id status_domain beszel_domain
+    local token chat_id
     token="$(get_env_val "TELEGRAM_BOT_TOKEN" "" "${env_file}")"
     chat_id="$(get_env_val "TELEGRAM_CHAT_ID" "" "${env_file}")"
-    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
-    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
 
     if [[ -z "${token}" || -z "${chat_id}" ]]; then
         msg_error "Telegram Bot Token or Chat ID is not configured in ${env_file}."
@@ -153,34 +184,34 @@ send_telegram_test_notification() {
         return 1
     fi
 
-    local host_str ts_str
-    host_str="$(hostname 2>/dev/null || printf 'infiax-vps')"
-    ts_str="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    # shellcheck source=scripts/telegram-bot.sh
+    source "${SCRIPT_DIR}/telegram-bot.sh"
 
-    local text_payload
-    text_payload="✅ *Infiax Status Monitor — Test Notification*
+    msg_info "Registering premade Telegram slash commands (/status, /metrics, /containers, /network, /alerts, /help)..."
+    register_bot_commands || true
+    enable_telegram_bot_service || true
 
-*Host:* \`${host_str}\`
-*Time:* \`${ts_str}\`
-*Uptime Kuma:* https://${status_domain}
-*Beszel Hub:* https://${beszel_domain}
-
-Telegram alert delivery is operational."
-
-    msg_info "Sending test message to Chat ID '${chat_id}' via Telegram Bot API..."
+    msg_info "Sending interactive live status card with inline buttons to Chat ID '${chat_id}'..."
+    local html_payload reply_markup status_domain beszel_domain
+    status_domain="$(get_env_val "STATUS_DOMAIN" "${ISM_DEFAULT_STATUS_DOMAIN}" "${env_file}")"
+    beszel_domain="$(get_env_val "BESZEL_DOMAIN" "${ISM_DEFAULT_BESZEL_DOMAIN}" "${env_file}")"
+    html_payload="$(format_msg_status)"
+    reply_markup="$(build_inline_keyboard "${status_domain}" "${beszel_domain}")"
 
     local response=""
     response="$(curl -fsSL --max-time 10 -X POST \
         "https://api.telegram.org/bot${token}/sendMessage" \
         -d "chat_id=${chat_id}" \
-        -d "parse_mode=Markdown" \
-        --data-urlencode "text=${text_payload}" 2>/dev/null || true)"
+        -d "parse_mode=HTML" \
+        -d "disable_web_page_preview=true" \
+        --data-urlencode "text=${html_payload}" \
+        --data-urlencode "reply_markup=${reply_markup}" 2>/dev/null || true)"
 
     if [[ "${response}" == *'"ok":true'* ]]; then
-        msg_ok "Telegram test notification delivered and verified by Telegram API!"
+        msg_ok "Interactive Telegram dashboard delivered & premade slash commands activated!"
         return 0
     else
-        msg_error "Failed to deliver Telegram test notification. Verify your Bot Token, Chat ID, and outbound HTTPS connectivity."
+        msg_error "Failed to deliver Telegram notification. Verify your Bot Token, Chat ID, and outbound HTTPS connectivity."
         return 1
     fi
 }

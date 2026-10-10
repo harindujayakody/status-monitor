@@ -170,10 +170,16 @@ run_uninstaller() {
         msg_info "Docker daemon not active; skipped container teardown."
     fi
 
-    # 2. Remove CLI symlink if present
+    # 2. Remove CLI symlink and Telegram Bot systemd unit if present
     if [[ -L /usr/local/bin/infiax-monitor ]]; then
         rm -f /usr/local/bin/infiax-monitor
         msg_ok "Removed /usr/local/bin/infiax-monitor CLI symlink."
+    fi
+    if [[ -f /etc/systemd/system/infiax-telegram-bot.service ]] && command -v systemctl >/dev/null 2>&1; then
+        systemctl disable --now infiax-telegram-bot.service >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/infiax-telegram-bot.service
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        msg_ok "Removed infiax-telegram-bot.service systemd unit."
     fi
 
     # 3. Handle Mode 1 vs Mode 2 filesystem cleanup

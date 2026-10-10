@@ -222,11 +222,17 @@ In Beszel (`https://monitor.example.com` -> **Network Monitors** -> **+ Add Moni
 | `Ping` | `Cloudflare Edge` | `1.1.1.1` | `60s` | Measures baseline VPS datacenter network latency & packet loss |
 | `TCP` / `HTTP` | `Production Site` | `example.com:443` | `60s` | Measures reachability from your VPS to your production services |
 
-### 3. Configure Telegram Instant Alerts
+### 3. Configure Telegram Instant Alerts & Interactive Bot Commands
 
 1. Run `sudo infiax-monitor telegram` (Option **12**) to configure your `@BotFather` token and auto-detect your Chat ID (stored in `/opt/infiax-status-monitor/.env` with `0600` permissions).
-2. Run `sudo infiax-monitor test-telegram` (Option **13**) to verify instant delivery.
-3. Enable notifications in:
+2. Run `sudo infiax-monitor test-telegram` (Option **13**) to register premade Telegram slash commands (`setMyCommands`), start the lightweight `infiax-telegram-bot` responder service, and send an interactive live dashboard card with inline buttons to your Telegram chat:
+   - `/status` — 📊 Full Server, Uptime, Network & Container Summary
+   - `/metrics` — ⚡ Live CPU, RAM, Swap & Disk Usage with visual bars (`▰▰▰▱▱▱▱▱▱▱`)
+   - `/containers` — 🐳 Docker Container Health & Memory Usage
+   - `/network` — 🌐 Outbound Ping Latency (`1.1.1.1`) & HTTPS Endpoint Status
+   - `/alerts` — 🔔 Audit All 6 Beszel Alert Thresholds
+   - `/help` — 🤖 Show Interactive Command Menu & Inline Buttons
+3. Enable push notifications in:
    - **Uptime Kuma** (`Settings -> Notifications -> Telegram`)
    - **Beszel Hub** (`Settings -> Notifications` using `telegram://<BOT_TOKEN>@telegram?chats=<CHAT_ID>`)
 

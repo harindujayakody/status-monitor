@@ -1,0 +1,55 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# SSH Keys & TLS Certificates (NEVER commit private keys)
+*.key
+*.pem
+*.crt
+*.csr
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+ssh-key*
+authorized_keys
+
+# Runtime Data, Databases & Sockets
+data/
+beszel_data/
+beszel_agent_data/
+beszel_socket/
+uptime-kuma-data/
+caddy_data/
+caddy_config/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sock
+
+# Backups & Archives
+backups/
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+*.sha256
+
+# Logs & Temporary Files
+logs/
+*.log
+tmp/
+.tmp/
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/

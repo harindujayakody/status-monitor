@@ -1,0 +1,153 @@
+# ==============================================================================
+# INFIAX STATUS MONITOR — DOCKER COMPOSE STACK
+# ==============================================================================
+# Designed for Ubuntu Server 22.04 LTS (AMD64 / ARM64) on low-memory VPS (~1 GiB RAM).
+# Security Model:
+#   - Only Caddy publishes public ports (80/tcp, 443/tcp, 443/udp).
+#   - Uptime Kuma and Beszel Hub reside on the private 'monitor_net' bridge.
+#   - Beszel Agent communicates with Beszel Hub over a shared Unix socket
+#     (/beszel_socket/beszel.sock) so no public agent TCP port is opened.
+#   - Docker socket (/var/run/docker.sock) is mounted read-only ONLY into
+#     beszel-agent for container metrics.
+# ==============================================================================
+
+name: infiax-status-monitor
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.11.7-alpine}
+    container_name: infiax-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      TZ: ${TZ:-UTC}
+      STATUS_DOMAIN: ${STATUS_DOMAIN:-status.infiax.com}
+      BESZEL_DOMAIN: ${BESZEL_DOMAIN:-dev-monitor.infiax.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@infiax.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+      - ./data/caddy/logs:/var/log/caddy
+    networks:
+      - monitor_net
+    depends_on:
+      uptime-kuma:
+        condition: service_healthy
+      beszel:
+        condition: service_healthy
+    mem_limit: ${CADDY_MEM_LIMIT:-128m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  uptime-kuma:
+    image: ${UPTIME_KUMA_IMAGE:-louislam/uptime-kuma:2.5.6-slim}
+    container_name: infiax-uptime-kuma
+    restart: unless-stopped
+    expose:
+      - "3001"
+    environment:
+      TZ: ${TZ:-UTC}
+      NODE_OPTIONS: "--max-old-space-size=${UPTIME_KUMA_NODE_MAX_OLD_SPACE:-256}"
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    networks:
+      - monitor_net
+    mem_limit: ${UPTIME_KUMA_MEM_LIMIT:-384m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "extra/healthcheck || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  beszel:
+    image: ${BESZEL_HUB_IMAGE:-henrygd/beszel:0.21.0}
+    container_name: infiax-beszel-hub
+    restart: unless-stopped
+    expose:
+      - "8090"
+    environment:
+      TZ: ${TZ:-UTC}
+      APP_URL: ${BESZEL_APP_URL:-https://dev-monitor.infiax.com}
+    volumes:
+      - ./data/beszel:/beszel_data
+      - ./data/beszel-socket:/beszel_socket
+    networks:
+      - monitor_net
+    mem_limit: ${BESZEL_HUB_MEM_LIMIT:-192m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://localhost:8090"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  beszel-agent:
+    image: ${BESZEL_AGENT_IMAGE:-henrygd/beszel-agent:0.21.0}
+    container_name: infiax-beszel-agent
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-UTC}
+      LISTEN: ${BESZEL_AGENT_LISTEN:-/beszel_socket/beszel.sock}
+      KEY: ${BESZEL_AGENT_KEY:-}
+      TOKEN: ${BESZEL_AGENT_TOKEN:-}
+      HUB_URL: ${BESZEL_HUB_URL:-https://dev-monitor.infiax.com}
+      DOCKER_IMAGE_CHECK: ${BESZEL_DOCKER_IMAGE_CHECK:-false}
+      MEM_CALC: ${BESZEL_MEM_CALC:-default}
+    volumes:
+      - ./data/beszel-agent:/var/lib/beszel-agent
+      - ./data/beszel-socket:/beszel_socket
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      beszel:
+        condition: service_healthy
+    mem_limit: ${BESZEL_AGENT_MEM_LIMIT:-128m}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  monitor_net:
+    name: infiax_monitor_net
+    driver: bridge
+    internal: false

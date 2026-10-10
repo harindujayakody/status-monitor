@@ -1,0 +1,63 @@
+name: Validate Infiax Status Monitor
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Syntax, ShellCheck, Compose, Caddy & Test Suite
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify no accidental secrets or private keys committed
+        run: |
+          if git ls-files | grep -E '\.(key|pem|p12|pfx)$|^\.env$|^ssh-key'; then
+            echo "ERROR: Prohibited key or .env file tracked in Git!"
+            exit 1
+          fi
+
+      - name: Validate Bash syntax (bash -n)
+        run: |
+          for script in install.sh monitor.sh uninstall.sh scripts/*.sh tests/*.sh; do
+            echo "Checking syntax: ${script}"
+            bash -n "${script}"
+          done
+
+      - name: Run ShellCheck static analysis
+        run: |
+          shellcheck -x install.sh monitor.sh uninstall.sh scripts/*.sh tests/*.sh
+
+      - name: Validate YAML formatting
+        run: |
+          yamllint -d "{extends: default, rules: {line-length: {max: 140}, document-start: disable}}" compose.yaml .github/workflows/validate.yml
+
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose -f compose.yaml config -q
+          rm -f .env
+
+      - name: Validate Caddyfile using official Caddy container
+        run: |
+          docker run --rm \
+            -v "${PWD}/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e STATUS_DOMAIN=status.infiax.com \
+            -e BESZEL_DOMAIN=dev-monitor.infiax.com \
+            -e ACME_EMAIL=admin@infiax.com \
+            caddy:2.11.7-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Run Automated Test Suites
+        run: |
+          bash tests/test-installer.sh
+          bash tests/test-menu.sh
+          bash tests/test-uninstall.sh

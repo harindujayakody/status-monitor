@@ -16,6 +16,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck source=scripts/preflight.sh
+source "${SCRIPT_DIR}/preflight.sh"
 
 # --- Visual Bar Helper (10 blocks) ---
 make_bar() {
